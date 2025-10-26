@@ -1,53 +1,90 @@
 import tkinter as tk
-from tkinter import messagebox, ttk, Label, Tk
+from tkinter import messagebox, ttk
 import sqlite3
-import os, sys
+import os, sys, csv, subprocess
+from datetime import datetime, date
+from PIL import Image, ImageTk  # pip install pillow
+import time
 
-import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox
-from PIL import Image, ImageTk   # Logo için
 
-# Tema ayarları
-BG_COLOR = "#2b2b2b"
+# ==========================
+# Tema & Genel Ayarlar
+# ==========================
 FG_COLOR = "#ffffff"
-ACCENT = "#0078D7"
+BG_COLOR = "#1e1e2e"   # Arka plan (VSCode tarzı koyu)
+CARD_COLOR = "#2c2c3a" # Kart/panel
+ACCENT = "#00aaff"     # Vurgu
+TEXT_LIGHT = "#ffffff"
+TEXT_GRAY = "#b8b8b8"
+
+APP_TITLE = "SmartPOS Mini Pro"
+APP_VERSION = "v2.1"
+
+def center_window(win, w=480, h=460):
+    win.update_idletasks()
+    screen_w = win.winfo_screenwidth()
+    screen_h = win.winfo_screenheight()
+    x = int((screen_w/2) - (w/2))
+    y = int((screen_h/2) - (h/2))
+    win.geometry(f"{w}x{h}+{x}+{y}")
 
 def set_theme(window):
-    window.configure(bg=BG_COLOR)
     style = ttk.Style()
-    style.theme_use("clam")
+    window.configure(bg=BG_COLOR)
+    try:
+        style.theme_use("clam")
+    except:
+        pass
+
+    style.configure("TFrame", background=BG_COLOR)
+    style.configure("TLabel", background=BG_COLOR, foreground=TEXT_LIGHT, font=("Segoe UI", 10))
+    style.configure("Header.TLabel", background=BG_COLOR, foreground=ACCENT, font=("Segoe UI", 16, "bold"))
+    style.configure("Sub.TLabel", background=BG_COLOR, foreground=TEXT_GRAY, font=("Segoe UI", 9))
+    style.configure("Card.TFrame", background=CARD_COLOR, relief="flat", borderwidth=0)
 
     style.configure("TButton",
                     background=ACCENT,
                     foreground="white",
-                    font=("Arial", 11, "bold"),
-                    padding=6)
+                    font=("Segoe UI", 10, "bold"),
+                    padding=8,
+                    borderwidth=0)
     style.map("TButton",
-              background=[("active", "#005a9e")])
+              background=[("active", "#0088cc")],
+              relief=[("pressed", "flat")])
 
-    style.configure("TLabel", background=BG_COLOR, foreground=FG_COLOR, font=("Arial", 10))
-    style.configure("Header.TLabel", background=BG_COLOR, foreground=ACCENT, font=("Arial", 16, "bold"))
+    style.configure("Treeview",
+                    background="#232332",
+                    fieldbackground="#232332",
+                    foreground=TEXT_LIGHT,
+                    rowheight=26,
+                    bordercolor="#000000",
+                    borderwidth=0)
+    style.configure("Treeview.Heading",
+                    background="#303045",
+                    foreground=TEXT_LIGHT,
+                    font=("Segoe UI", 10, "bold"))
+    style.map("Treeview", background=[("selected", "#004e75")])
 
-def show_logo(window):
+def show_logo(parent):
     try:
-        img = Image.open("smartpos_logo.png")
-        img = img.resize((100, 100))
-        logo_img = ImageTk.PhotoImage(img)
-        label = tk.Label(window, image=logo_img, bg=BG_COLOR)
-        label.image = logo_img # type: ignore
-        label.pack(pady=5)
-    except:
-        pass  # logo yoksa hata verme
-
+        if os.path.exists("smartpos_logo.png"):
+            img = Image.open("smartpos_logo.png")
+            img = img.resize((96, 96))
+            logo_img = ImageTk.PhotoImage(img)
+            lbl = tk.Label(parent, image=logo_img, bg=BG_COLOR)
+            lbl.image = logo_img  # type: ignore
+            lbl.pack(pady=(10, 6))
+    except Exception as e:
+        # Logo opsiyonel, hata göstermeyelim
+        pass
 
 # ==========================
-# Veritabanı Başlangıcı
+# Veritabanı
 # ==========================
-conn = sqlite3.connect("database.db")
+DB_PATH = "database.db"
+conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
 
-# Kullanıcı tablosuna role sütunu ekle
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,7 +97,7 @@ CREATE TABLE IF NOT EXISTS users (
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
+    name TEXT UNIQUE,
     price REAL,
     stock INTEGER
 )
@@ -71,295 +108,929 @@ CREATE TABLE IF NOT EXISTS sales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     product_name TEXT,
     quantity INTEGER,
-    total REAL
+    total REAL,
+    created_at TEXT DEFAULT (datetime('now'))
 )
 """)
+
+# Eski tabloda created_at yoksa ekle
+try:
+    cursor.execute("PRAGMA table_info(sales)")
+    cols = [c[1] for c in cursor.fetchall()]
+    if "created_at" not in cols:
+        cursor.execute("ALTER TABLE sales ADD COLUMN created_at TEXT DEFAULT (datetime('now'))")
+        conn.commit()
+except:
+    pass
 
 # Varsayılan kullanıcılar
 cursor.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)", ("admin", "1234", "admin"))
 cursor.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)", ("kasiyer", "1234", "cashier"))
 conn.commit()
 
+# ==========================
+# Gelişmiş Yardımcılar
+# ==========================
+def parse_float_safe(val, default=None):
+    try:
+        return float(str(val).replace(",", "."))
+    except:
+        return default
+
+def parse_int_safe(val, default=None):
+    try:
+        return int(str(val))
+    except:
+        return default
+
+def refresh_product_values_for_combo():
+    cursor.execute("SELECT name FROM products ORDER BY name ASC")
+    return [p[0] for p in cursor.fetchall()]
 
 # ==========================
-# Giriş Ekranı
+# Login
 # ==========================
-def login():
-    username = entry_username.get()
-    password = entry_password.get()
+def login_action():
+    username = entry_username.get().strip()
+    password = entry_password.get().strip()
     cursor.execute("SELECT role FROM users WHERE username=? AND password=?", (username, password))
     user = cursor.fetchone()
-
     if user:
         role = user[0]
         open_main_window(role)
+        login_window.withdraw()
     else:
         messagebox.showerror("Hata", "Kullanıcı adı veya şifre hatalı!")
 
-
-
-def open_main_window(role):
-    login_window.destroy()
-
-    main_window = tk.Tk()
-    main_window.title(f"SmartPOS Mini - {role.upper()}")
-    main_window.geometry("400x550")
-    set_theme(main_window)
-
-    tk.Label(main_window, text="SmartPOS Mini", font=("Arial", 16, "bold")).pack(pady=10)
-
-    if role == "admin":
-        ttk.Button(main_window, text="🛒 Ürün Ekle", command=add_product_window).pack(pady=5)
-        ttk.Button(main_window, text="👤 Kullanıcı Oluştur", command=add_user_window).pack(pady=5)
-        ttk.Button(main_window, text="📋 Kullanıcı Yönetimi", command=manage_users_window).pack(pady=5)
-
-
-    ttk.Button(main_window, text="💰 Satış Yap", command=sell_product_window).pack(pady=5)
-    ttk.Button(main_window, text="📊 Rapor Gör", command=show_report).pack(pady=5)
-    ttk.Button(main_window, text="💾 Günlük Raporu Kaydet", command=export_daily_report).pack(pady=5)
-    
-    
-    ttk.Button(main_window, text="🔓 Çıkış Yap", command=lambda: logout(main_window)).pack(pady=15)
-
-    main_window.mainloop()
-
-
+def toggle_password():
+    if entry_password.cget("show") == "*":
+        entry_password.config(show="")
+        btn_toggle_pw.config(text="🙈 Gizle")
+    else:
+        entry_password.config(show="*")
+        btn_toggle_pw.config(text="👁 Göster")
 
 # ==========================
-# Ürün Ekleme
+# Ürün Yönetimi (Liste/Arama/Ekle/Düzenle/Sil)
 # ==========================
-def add_product_window():
+def product_management_window():
     win = tk.Toplevel()
-    win.title("Ürün Ekle")
-    win.geometry("300x250")
+    win.title("Ürün Yönetimi")
     set_theme(win)
+    center_window(win, 560, 460)
 
-    tk.Label(win, text="Ürün Adı:").pack()
-    name = tk.Entry(win)
-    name.pack()
+    header = ttk.Frame(win, style="Card.TFrame")
+    header.pack(fill="x", padx=14, pady=(14, 8))
 
-    tk.Label(win, text="Fiyat:").pack()
-    price = tk.Entry(win)
-    price.pack()
+    ttk.Label(header, text="Ürünler", style="Header.TLabel").pack(side="left", padx=10, pady=10)
+    search_var = tk.StringVar()
+    search_entry = ttk.Entry(header, textvariable=search_var)
+    search_entry.pack(side="right", padx=10, pady=10)
+    ttk.Label(header, text="Ara:", style="TLabel").pack(side="right", pady=10)
 
-    tk.Label(win, text="Stok:").pack()
-    stock = tk.Entry(win)
-    stock.pack()
+    body = ttk.Frame(win, style="Card.TFrame")
+    body.pack(fill="both", expand=True, padx=14, pady=8)
 
-    def save_product():
-        cursor.execute("INSERT INTO products (name, price, stock) VALUES (?, ?, ?)", 
-                       (name.get(), float(price.get()), int(stock.get())))
-        conn.commit()
-        messagebox.showinfo("Başarılı", "Ürün eklendi!")
-        win.destroy()
+    cols = ("ID", "Ad", "Fiyat", "Stok")
+    tree = ttk.Treeview(body, columns=cols, show="headings")
+    for c in cols:
+        tree.heading(c, text=c)
+    tree.column("ID", width=60, anchor="center")
+    tree.column("Ad", anchor="w", width=220)
+    tree.column("Fiyat", anchor="e", width=100)
+    tree.column("Stok", anchor="center", width=80)
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-    ttk.Button(win, text="Kaydet", command=save_product).pack(pady=10)
+    btns = ttk.Frame(win, style="Card.TFrame")
+    btns.pack(fill="x", padx=14, pady=(0, 14))
 
-def add_user_window():
-    win = tk.Toplevel()
-    win.title("Yeni Kullanıcı Oluştur")
-    win.geometry("300x550")
-    set_theme(win)
+    def load_products(filter_text=""):
+        for r in tree.get_children():
+            tree.delete(r)
+        if filter_text:
+            q = f"%{filter_text.strip()}%"
+            cursor.execute("SELECT id, name, price, stock FROM products WHERE name LIKE ? ORDER BY name ASC", (q,))
+        else:
+            cursor.execute("SELECT id, name, price, stock FROM products ORDER BY name ASC")
+        for row in cursor.fetchall():
+            pid, name, price, stock = row
+            tree.insert("", "end", values=(pid, name, f"{price:.2f}", stock))
 
-    tk.Label(win, text="Kullanıcı Adı:").pack()
-    username = tk.Entry(win)
-    username.pack(pady=5)
+    def add_product_dialog():
+        dlg = tk.Toplevel(win)
+        dlg.title("Ürün Ekle")
+        set_theme(dlg)
+        center_window(dlg, 360, 280)
 
-    tk.Label(win, text="Şifre:").pack()
-    password = tk.Entry(win, show="*")
-    password.pack(pady=5)
+        frm = ttk.Frame(dlg, style="Card.TFrame")
+        frm.pack(fill="both", expand=True, padx=16, pady=16)
 
-    tk.Label(win, text="Rol Seç:").pack()
-    role = ttk.Combobox(win, values=["admin", "cashier"])
-    role.set("cashier")
-    role.pack(pady=5)
+        ttk.Label(frm, text="Ürün Adı:").pack(anchor="w", pady=(6, 2))
+        e_name = ttk.Entry(frm)
+        e_name.pack(fill="x")
 
-    def save_user():
-        try:
-            cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-                           (username.get(), password.get(), role.get()))
+        ttk.Label(frm, text="Fiyat:").pack(anchor="w", pady=(10, 2))
+        e_price = ttk.Entry(frm)
+        e_price.pack(fill="x")
+
+        ttk.Label(frm, text="Stok:").pack(anchor="w", pady=(10, 2))
+        e_stock = ttk.Entry(frm)
+        e_stock.pack(fill="x")
+
+        def save():
+            name = e_name.get().strip()
+            price = parse_float_safe(e_price.get(), None)
+            stock = parse_int_safe(e_stock.get(), None)
+            if not name or price is None or stock is None:
+                messagebox.showwarning("Uyarı", "Lütfen geçerli ad/fiyat/stok girin.")
+                return
+            try:
+                cursor.execute("INSERT INTO products (name, price, stock) VALUES (?, ?, ?)", (name, price, stock))
+                conn.commit()
+                messagebox.showinfo("Başarılı", "Ürün eklendi.")
+                dlg.destroy()
+                load_products(search_var.get())
+            except sqlite3.IntegrityError:
+                messagebox.showerror("Hata", "Bu ürün adı zaten mevcut!")
+
+        ttk.Button(frm, text="Kaydet", command=save).pack(pady=14)
+
+    def edit_selected_product():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Uyarı", "Lütfen düzenlenecek ürünü seçin.")
+            return
+        values = tree.item(sel[0])["values"]
+        pid, name_cur, price_cur, stock_cur = values
+
+        dlg = tk.Toplevel(win)
+        dlg.title("Ürün Düzenle")
+        set_theme(dlg)
+        center_window(dlg, 360, 300)
+
+        frm = ttk.Frame(dlg, style="Card.TFrame")
+        frm.pack(fill="both", expand=True, padx=16, pady=16)
+
+        ttk.Label(frm, text=f"Ürün ID: {pid}", style="Sub.TLabel").pack(anchor="w", pady=(0, 6))
+
+        ttk.Label(frm, text="Ürün Adı:").pack(anchor="w", pady=(6, 2))
+        e_name = ttk.Entry(frm)
+        e_name.insert(0, name_cur)
+        e_name.pack(fill="x")
+
+        ttk.Label(frm, text="Fiyat:").pack(anchor="w", pady=(10, 2))
+        e_price = ttk.Entry(frm)
+        e_price.insert(0, price_cur)
+        e_price.pack(fill="x")
+
+        ttk.Label(frm, text="Stok:").pack(anchor="w", pady=(10, 2))
+        e_stock = ttk.Entry(frm)
+        e_stock.insert(0, stock_cur)
+        e_stock.pack(fill="x")
+
+        def save():
+            name = e_name.get().strip()
+            price = parse_float_safe(e_price.get(), None)
+            stock = parse_int_safe(e_stock.get(), None)
+            if not name or price is None or stock is None:
+                messagebox.showwarning("Uyarı", "Lütfen geçerli ad/fiyat/stok girin.")
+                return
+            try:
+                cursor.execute("UPDATE products SET name=?, price=?, stock=? WHERE id=?", (name, price, stock, pid))
+                conn.commit()
+                messagebox.showinfo("Başarılı", "Ürün güncellendi.")
+                dlg.destroy()
+                load_products(search_var.get())
+            except sqlite3.IntegrityError:
+                messagebox.showerror("Hata", "Bu ürün adı zaten mevcut!")
+
+        ttk.Button(frm, text="Kaydet", command=save).pack(pady=14)
+
+    def delete_selected_product():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Uyarı", "Lütfen silinecek ürünü seçin.")
+            return
+        values = tree.item(sel[0])["values"]
+        pid, name = values[0], values[1]
+        if messagebox.askyesno("Onay", f"'{name}' adlı ürünü silmek istiyor musun?"):
+            cursor.execute("DELETE FROM products WHERE id=?", (pid,))
             conn.commit()
-            messagebox.showinfo("Başarılı", "Yeni kullanıcı eklendi!")
+            load_products(search_var.get())
+            messagebox.showinfo("Silindi", f"{name} silindi.")
+
+    ttk.Button(btns, text="➕ Ürün Ekle", command=add_product_dialog).pack(side="left", padx=6, pady=10)
+    ttk.Button(btns, text="✏️ Düzenle", command=edit_selected_product).pack(side="left", padx=6, pady=10)
+    ttk.Button(btns, text="🗑 Sil", command=delete_selected_product).pack(side="left", padx=6, pady=10)
+    ttk.Button(btns, text="🔄 Yenile", command=lambda: load_products(search_var.get())).pack(side="right", padx=6, pady=10)
+
+    def on_search(*_):
+        load_products(search_var.get())
+
+    search_var.trace_add("write", on_search)
+    load_products()
+
+# ==========================
+# Kullanıcı Yönetimi
+# ==========================
+def add_user_window(parent=None):
+    win = tk.Toplevel(parent)
+    win.title("Yeni Kullanıcı Oluştur")
+    set_theme(win)
+    center_window(win, 360, 320)
+
+    frm = ttk.Frame(win, style="Card.TFrame")
+    frm.pack(fill="both", expand=True, padx=16, pady=16)
+
+    ttk.Label(frm, text="Kullanıcı Adı:").pack(anchor="w", pady=(6, 2))
+    e_username = ttk.Entry(frm)
+    e_username.pack(fill="x")
+
+    ttk.Label(frm, text="Şifre:").pack(anchor="w", pady=(10, 2))
+    e_password = ttk.Entry(frm, show="*")
+    e_password.pack(fill="x")
+
+    ttk.Label(frm, text="Rol:").pack(anchor="w", pady=(10, 2))
+    cb_role = ttk.Combobox(frm, values=["admin", "cashier"], state="readonly")
+    cb_role.set("cashier")
+    cb_role.pack(fill="x")
+
+    def save():
+        u = e_username.get().strip()
+        p = e_password.get().strip()
+        r = cb_role.get().strip()
+        if not u or not p:
+            messagebox.showwarning("Uyarı", "Kullanıcı adı ve şifre zorunlu.")
+            return
+        try:
+            cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (u, p, r))
+            conn.commit()
+            messagebox.showinfo("Başarılı", "Kullanıcı eklendi.")
             win.destroy()
         except sqlite3.IntegrityError:
             messagebox.showerror("Hata", "Bu kullanıcı adı zaten mevcut!")
 
-    ttk.Button(win, text="Kaydet", command=save_user).pack(pady=10)
+    ttk.Button(frm, text="Kaydet", command=save).pack(pady=14)
 
 def manage_users_window():
     win = tk.Toplevel()
     win.title("Kullanıcı Yönetimi")
-    win.geometry("400x300")
     set_theme(win)
+    center_window(win, 520, 420)
 
-    tk.Label(win, text="Kayıtlı Kullanıcılar", font=("Arial", 12, "bold"), bg=BG_COLOR, fg=ACCENT).pack(pady=5)
+    ttk.Label(win, text="Kayıtlı Kullanıcılar", style="Header.TLabel").pack(pady=(14, 6))
 
-    # Kullanıcı tablosu
-    tree = ttk.Treeview(win, columns=("ID", "Kullanıcı", "Rol"), show="headings")
-    tree.heading("ID", text="ID")
-    tree.heading("Kullanıcı", text="Kullanıcı Adı")
-    tree.heading("Rol", text="Rol")
-    tree.pack(fill="both", expand=True, pady=5)
+    body = ttk.Frame(win, style="Card.TFrame")
+    body.pack(fill="both", expand=True, padx=14, pady=8)
 
-    # Kullanıcıları getir
+    tree = ttk.Treeview(body, columns=("ID", "Kullanıcı", "Rol"), show="headings")
+    for c in ("ID", "Kullanıcı", "Rol"):
+        tree.heading(c, text=c)
+    tree.column("ID", width=60, anchor="center")
+    tree.column("Kullanıcı", anchor="w", width=240)
+    tree.column("Rol", anchor="center", width=100)
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+
     def load_users():
-        for row in tree.get_children():
-            tree.delete(row)
-        cursor.execute("SELECT id, username, role FROM users")
-        for user in cursor.fetchall():
-            tree.insert("", "end", values=user)
+        for r in tree.get_children():
+            tree.delete(r)
+        cursor.execute("SELECT id, username, role FROM users ORDER BY username ASC")
+        for u in cursor.fetchall():
+            tree.insert("", "end", values=u)
+
+    def add_user():
+        add_user_window(win)
+        win.after(300, load_users)
+
+    def edit_user():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Uyarı", "Lütfen düzenlenecek kullanıcıyı seçin.")
+            return
+        uid, uname, role = tree.item(sel[0])["values"]
+
+        dlg = tk.Toplevel(win)
+        dlg.title("Kullanıcı Düzenle")
+        set_theme(dlg)
+        center_window(dlg, 360, 300)
+
+        frm = ttk.Frame(dlg, style="Card.TFrame")
+        frm.pack(fill="both", expand=True, padx=16, pady=16)
+
+        ttk.Label(frm, text=f"Kullanıcı ID: {uid}", style="Sub.TLabel").pack(anchor="w")
+        ttk.Label(frm, text="Kullanıcı Adı:").pack(anchor="w", pady=(10, 2))
+        e_username = ttk.Entry(frm)
+        e_username.insert(0, uname)
+        e_username.pack(fill="x")
+
+        ttk.Label(frm, text="Yeni Şifre (opsiyonel):").pack(anchor="w", pady=(10, 2))
+        e_password = ttk.Entry(frm, show="*")
+        e_password.pack(fill="x")
+
+        ttk.Label(frm, text="Rol:").pack(anchor="w", pady=(10, 2))
+        cb_role = ttk.Combobox(frm, values=["admin", "cashier"], state="readonly")
+        cb_role.set(role)
+        cb_role.pack(fill="x")
+
+        def save():
+            new_u = e_username.get().strip()
+            new_p = e_password.get().strip()
+            new_r = cb_role.get().strip()
+
+            if not new_u:
+                messagebox.showwarning("Uyarı", "Kullanıcı adı zorunlu.")
+                return
+            try:
+                if new_p:
+                    cursor.execute("UPDATE users SET username=?, password=?, role=? WHERE id=?",
+                                   (new_u, new_p, new_r, uid))
+                else:
+                    cursor.execute("UPDATE users SET username=?, role=? WHERE id=?",
+                                   (new_u, new_r, uid))
+                conn.commit()
+                messagebox.showinfo("Başarılı", "Kullanıcı güncellendi.")
+                dlg.destroy()
+                load_users()
+            except sqlite3.IntegrityError:
+                messagebox.showerror("Hata", "Bu kullanıcı adı zaten mevcut!")
+
+        ttk.Button(frm, text="Kaydet", command=save).pack(pady=14)
+
+    def delete_user():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Uyarı", "Lütfen silinecek kullanıcıyı seçin.")
+            return
+        uid, uname, _ = tree.item(sel[0])["values"]
+        if uname == "admin":
+            messagebox.showwarning("Uyarı", "Admin kullanıcısı silinemez!")
+            return
+        if messagebox.askyesno("Onay", f"{uname} adlı kullanıcı silinsin mi?"):
+            cursor.execute("DELETE FROM users WHERE id=?", (uid,))
+            conn.commit()
+            messagebox.showinfo("Silindi", f"{uname} silindi.")
+            load_users()
+
+    btns = ttk.Frame(win, style="Card.TFrame")
+    btns.pack(fill="x", padx=14, pady=(0, 14))
+    ttk.Button(btns, text="➕ Ekle", command=add_user).pack(side="left", padx=6, pady=10)
+    ttk.Button(btns, text="✏️ Düzenle", command=edit_user).pack(side="left", padx=6, pady=10)
+    ttk.Button(btns, text="🗑 Sil", command=delete_user).pack(side="left", padx=6, pady=10)
+    ttk.Button(btns, text="🔄 Yenile", command=load_users).pack(side="right", padx=6, pady=10)
 
     load_users()
 
-    # Seçili kullanıcıyı sil
-    def delete_user():
-        selected = tree.selection()
-        if not selected:
-            messagebox.showwarning("Uyarı", "Lütfen silinecek kullanıcıyı seçin.")
-            return
-        user_id = tree.item(selected[0])["values"][0]
-        username = tree.item(selected[0])["values"][1]
-
-        if username == "admin":
-            messagebox.showwarning("Uyarı", "Admin kullanıcısı silinemez!")
-            return
-
-        if messagebox.askyesno("Onay", f"{username} adlı kullanıcıyı silmek istediğine emin misin?"):
-            cursor.execute("DELETE FROM users WHERE id=?", (user_id,))
-            conn.commit()
-            messagebox.showinfo("Silindi", f"{username} kullanıcısı silindi.")
-            load_users()
-
-    ttk.Button(win, text="❌ Seçili Kullanıcıyı Sil", command=delete_user).pack(pady=8)
-    ttk.Button(win, text="🔄 Yenile", command=load_users).pack(pady=3)
-
 # ==========================
-# Satış Yapma
+# Satış
 # ==========================
 def sell_product_window():
     win = tk.Toplevel()
-    win.title("Satış Yap")
-    win.geometry("350x300")
+    win.title("Toplu Satış Yap")
     set_theme(win)
+    center_window(win, 620, 500)
 
-    tk.Label(win, text="Ürün Seç:").pack()
-    cursor.execute("SELECT name FROM products")
-    products = [p[0] for p in cursor.fetchall()]
+    ttk.Label(win, text="🛒 Toplu Satış Ekranı", style="Header.TLabel").pack(pady=(10, 5))
+    ttk.Label(win, text="Ürün seç, adet gir ve sepete ekle. En son 'Satışı Onayla' ile tamamla.", style="Sub.TLabel").pack(pady=(0, 10))
 
-    product_cb = ttk.Combobox(win, values=products)
-    product_cb.pack()
+    frame_top = ttk.Frame(win, style="Card.TFrame")
+    frame_top.pack(fill="x", padx=16, pady=(4, 10))
 
-    tk.Label(win, text="Adet:").pack()
-    quantity = tk.Entry(win)
-    quantity.pack()
+    ttk.Label(frame_top, text="Ürün:").grid(row=0, column=0, padx=6, pady=6)
+    products = refresh_product_values_for_combo()
+    cb_product = ttk.Combobox(frame_top, values=products, state="readonly", width=25)
+    cb_product.grid(row=0, column=1, padx=6, pady=6)
 
-    def make_sale():
-        product_name = product_cb.get()
-        qty = int(quantity.get())
-        cursor.execute("SELECT price, stock FROM products WHERE name=?", (product_name,))
-        result = cursor.fetchone()
-        if result:
-            price, stock = result
-            if qty <= stock:
-                total = qty * price
-                cursor.execute("UPDATE products SET stock = stock - ? WHERE name=?", (qty, product_name))
-                cursor.execute("INSERT INTO sales (product_name, quantity, total) VALUES (?, ?, ?)",
-                               (product_name, qty, total))
-                conn.commit()
-                messagebox.showinfo("Satış Başarılı", f"{product_name} - {qty} adet satıldı!\nToplam: {total} ₺")
-                win.destroy()
-            else:
-                messagebox.showerror("Hata", "Yetersiz stok!")
+    ttk.Label(frame_top, text="Adet:").grid(row=0, column=2, padx=6, pady=6)
+    e_qty = ttk.Entry(frame_top, width=6)
+    e_qty.insert(0, "1")
+    e_qty.grid(row=0, column=3, padx=6, pady=6)
+
+    ttk.Label(frame_top, text="Fiyat:").grid(row=1, column=0, padx=6, pady=6)
+    lbl_price = ttk.Label(frame_top, text="-", style="Sub.TLabel")
+    lbl_price.grid(row=1, column=1, sticky="w", padx=6, pady=6)
+
+    ttk.Label(frame_top, text="Stok:").grid(row=1, column=2, padx=6, pady=6)
+    lbl_stock = ttk.Label(frame_top, text="-", style="Sub.TLabel")
+    lbl_stock.grid(row=1, column=3, sticky="w", padx=6, pady=6)
+
+    # Ürün seçilince fiyat ve stok göster
+    def update_info(*_):
+        pname = cb_product.get()
+        cursor.execute("SELECT price, stock FROM products WHERE name=?", (pname,))
+        r = cursor.fetchone()
+        if r:
+            price, stock = r
+            lbl_price.config(text=f"{price:.2f} ₺")
+            lbl_stock.config(text=str(stock))
         else:
-            messagebox.showerror("Hata", "Ürün bulunamadı!")
+            lbl_price.config(text="-")
+            lbl_stock.config(text="-")
+    cb_product.bind("<<ComboboxSelected>>", update_info)
 
-    ttk.Button(win, text="Satışı Onayla", command=make_sale).pack(pady=10)
+    # Sepet tablo
+    frame_mid = ttk.Frame(win, style="Card.TFrame")
+    frame_mid.pack(fill="both", expand=True, padx=16, pady=10)
 
-def logout(window):
-    window.destroy()
-    os.execl(sys.executable, sys.executable, *sys.argv)
-
-# ==========================
-# Rapor Görüntüleme
-# ==========================
-def show_report():
-    win = tk.Toplevel()
-    win.title("Satış Raporu")
-    win.geometry("400x300")
-    set_theme(win)
-
-    tree = ttk.Treeview(win, columns=("Ürün", "Adet", "Toplam"), show="headings")
-    tree.heading("Ürün", text="Ürün")
-    tree.heading("Adet", text="Adet")
-    tree.heading("Toplam", text="Toplam ₺")
+    cols = ("Ürün", "Adet", "Fiyat", "Toplam")
+    tree = ttk.Treeview(frame_mid, columns=cols, show="headings")
+    for c in cols:
+        tree.heading(c, text=c)
+    tree.column("Ürün", width=240)
+    tree.column("Adet", width=80, anchor="center")
+    tree.column("Fiyat", width=100, anchor="e")
+    tree.column("Toplam", width=100, anchor="e")
     tree.pack(fill="both", expand=True)
 
-    cursor.execute("SELECT product_name, quantity, total FROM sales")
-    for row in cursor.fetchall():
-        tree.insert("", "end", values=row)
+    total_label = ttk.Label(win, text="Toplam: 0.00 ₺", style="Header.TLabel")
+    total_label.pack(pady=8)
+
+    # Sepete ekle
+    def add_to_cart():
+        pname = cb_product.get().strip()
+        qty = parse_int_safe(e_qty.get(), None)
+        if not pname or qty is None or qty <= 0:
+            messagebox.showwarning("Uyarı", "Geçerli ürün ve adet girin.")
+            return
+
+        cursor.execute("SELECT price, stock FROM products WHERE name=?", (pname,))
+        r = cursor.fetchone()
+        if not r:
+            messagebox.showerror("Hata", "Ürün bulunamadı.")
+            return
+        price, stock = r
+        if qty > stock:
+            messagebox.showerror("Hata", f"Yetersiz stok! (Mevcut: {stock})")
+            return
+
+        total = qty * price
+        tree.insert("", "end", values=(pname, qty, f"{price:.2f}", f"{total:.2f}"))
+        update_total_label()
+
+    def update_total_label():
+        total_sum = 0.0
+        for row in tree.get_children():
+            vals = tree.item(row)["values"]
+            total_sum += float(vals[3])
+        total_label.config(text=f"Toplam: {total_sum:.2f} ₺")
+
+    def remove_selected():
+        sel = tree.selection()
+        for s in sel:
+            tree.delete(s)
+        update_total_label()
+
+    frame_btns = ttk.Frame(win, style="Card.TFrame")
+    frame_btns.pack(fill="x", padx=16, pady=(0, 10))
+
+    ttk.Button(frame_btns, text="➕ Sepete Ekle", command=add_to_cart).pack(side="left", padx=6, pady=6)
+    ttk.Button(frame_btns, text="🗑 Seçiliyi Kaldır", command=remove_selected).pack(side="left", padx=6, pady=6)
+
+    # Satışı onayla
+    import uuid
+
+    def confirm_sale():
+        rows = tree.get_children()
+        if not rows:
+            messagebox.showwarning("Uyarı", "Sepet boş.")
+            return
+
+        # Her satış grubuna benzersiz fiş numarası
+        fis_id = f"FIS-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:5].upper()}"
+
+        sales_list = []
+        total_amount = 0.0
+
+        for row in rows:
+            pname, qty, price, total = tree.item(row)["values"]
+            qty = int(qty)
+            price = float(price)
+            total = float(total)
+            cursor.execute("UPDATE products SET stock = stock - ? WHERE name=?", (qty, pname))
+            cursor.execute("""
+                INSERT INTO sales (product_name, quantity, total, fis_id)
+                VALUES (?, ?, ?, ?)
+            """, (pname, qty, total, fis_id))
+            sales_list.append((pname, qty, price, total))
+            total_amount += total
+
+        conn.commit()
+
+        # PDF fatura yazdır
+        print_receipt(sales_list, total_amount, fis_id)
+
+        messagebox.showinfo("Satış Tamamlandı", f"Satış başarıyla kaydedildi.\nFiş No: {fis_id}\nToplam: {total_amount:.2f} ₺")
+        win.destroy()
+
+
+
+    ttk.Button(win, text="✅ Satışı Onayla", command=confirm_sale).pack(pady=(0, 12))
+
+
 
 # ==========================
-# Günlük Satış Raporu Görüntüleme
+# Raporlar (Tarih Filtreli)
 # ==========================
-import csv
-import os
-import subprocess
-from datetime import datetime
-from tkinter import messagebox
+def show_report_window():
+    win = tk.Toplevel()
+    win.title("Satış Raporu")
+    set_theme(win)
+    center_window(win, 640, 480)
 
+    header = ttk.Frame(win, style="Card.TFrame")
+    header.pack(fill="x", padx=14, pady=(14, 8))
+    ttk.Label(header, text="Satış Raporu", style="Header.TLabel").pack(side="left", padx=10, pady=10)
+
+    filt = ttk.Frame(win, style="Card.TFrame")
+    filt.pack(fill="x", padx=14, pady=8)
+
+    ttk.Label(filt, text="Başlangıç (YYYY-MM-DD):").pack(side="left", padx=(10, 6))
+    sv_from = tk.StringVar(value=date.today().strftime("%Y-%m-%d"))
+    e_from = ttk.Entry(filt, textvariable=sv_from, width=14)
+    e_from.pack(side="left", padx=(0, 12))
+
+    ttk.Label(filt, text="Bitiş (YYYY-MM-DD):").pack(side="left", padx=(10, 6))
+    sv_to = tk.StringVar(value=date.today().strftime("%Y-%m-%d"))
+    e_to = ttk.Entry(filt, textvariable=sv_to, width=14)
+    e_to.pack(side="left", padx=(0, 12))
+
+    def valid_date(s):
+        try:
+            datetime.strptime(s, "%Y-%m-%d")
+            return True
+        except:
+            return False
+
+    body = ttk.Frame(win, style="Card.TFrame")
+    body.pack(fill="both", expand=True, padx=14, pady=8)
+
+    cols = ("Fiş No", "Tarih", "Ürün", "Adet", "Toplam ₺")
+    tree = ttk.Treeview(body, columns=cols, show="headings")
+    for c in cols:
+        tree.heading(c, text=c)
+    tree.column("Fiş No", width=130, anchor="center")
+    tree.column("Tarih", width=120, anchor="center")
+    tree.column("Ürün", width=200, anchor="w")
+    tree.column("Adet", width=80, anchor="center")
+    tree.column("Toplam ₺", width=100, anchor="e")
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+
+    footer = ttk.Frame(win, style="Card.TFrame")
+    footer.pack(fill="x", padx=14, pady=(0,14))
+    lbl_sum = ttk.Label(footer, text="Toplam Adet: 0 | Toplam Ciro: 0.00 ₺", style="TLabel")
+    lbl_sum.pack(side="left", padx=10)
+
+    # -------------------- Raporu Listele --------------------
+    def load_report():
+        frm = sv_from.get().strip()
+        to = sv_to.get().strip()
+        if not (valid_date(frm) and valid_date(to)):
+            messagebox.showwarning("Uyarı", "Lütfen geçerli tarih formatı girin (YYYY-MM-DD).")
+            return
+
+        to_dt = datetime.strptime(to, "%Y-%m-%d")
+        to_plus = (to_dt.replace(hour=23, minute=59, second=59)).strftime("%Y-%m-%d %H:%M:%S")
+
+        for r in tree.get_children():
+            tree.delete(r)
+
+        cursor.execute("""
+            SELECT fis_id, created_at, product_name, quantity, total
+            FROM sales
+            WHERE datetime(created_at) BETWEEN datetime(?) AND datetime(?)
+            ORDER BY datetime(created_at) DESC
+        """, (f"{frm} 00:00:00", to_plus))
+        rows = cursor.fetchall()
+
+        total_qty = 0
+        total_sum = 0.0
+        for (fis_id, ts, pname, qty, total) in rows:
+            ts_disp = ts.replace("T", " ") if ts else ""
+            tree.insert("", "end", values=(fis_id, ts_disp, pname, qty, f"{total:.2f}"))
+            total_qty += int(qty)
+            total_sum += float(total)
+        lbl_sum.config(text=f"Toplam Adet: {total_qty} | Toplam Ciro: {total_sum:.2f} ₺")
+
+    # -------------------- CSV Dışa Aktar --------------------
+    def export_filtered_csv():
+        frm = sv_from.get().strip()
+        to = sv_to.get().strip()
+        if not (valid_date(frm) and valid_date(to)):
+            messagebox.showwarning("Uyarı", "Lütfen geçerli tarih formatı girin (YYYY-MM-DD).")
+            return
+
+        to_dt = datetime.strptime(to, "%Y-%m-%d")
+        to_plus = (to_dt.replace(hour=23, minute=59, second=59)).strftime("%Y-%m-%d %H:%M:%S")
+
+        cursor.execute("""
+            SELECT fis_id, created_at, product_name, quantity, total
+            FROM sales
+            WHERE datetime(created_at) BETWEEN datetime(?) AND datetime(?)
+            ORDER BY datetime(created_at) DESC
+        """, (f"{frm} 00:00:00", to_plus))
+        rows = cursor.fetchall()
+
+        if not rows:
+            messagebox.showinfo("Bilgi", "Bu tarih aralığında satış bulunamadı.")
+            return
+
+        report_dir = os.path.join(os.getcwd(), "reports")
+        os.makedirs(report_dir, exist_ok=True)
+        filename = os.path.join(report_dir, f"rapor_{frm}_to_{to}.csv")
+
+        try:
+            with open(filename, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Fiş No", "Tarih", "Ürün", "Adet", "Toplam ₺"])
+                for fis_id, ts, pname, qty, total in rows:
+                    writer.writerow([fis_id, ts, pname, qty, f"{float(total):.2f}"])
+        except Exception as e:
+            messagebox.showerror("Yazma Hatası", f"CSV dosyası oluşturulamadı:\n{e}")
+            return
+
+        if os.path.exists(filename):
+            messagebox.showinfo("Başarılı", f"Rapor kaydedildi:\n{filename}")
+            try:
+                if os.name == "nt":
+                    os.startfile(filename)
+                else:
+                    subprocess.call(('open', filename))
+            except Exception as e:
+                messagebox.showwarning("Uyarı", f"Rapor oluşturuldu ancak açılamadı:\n{e}")
+        else:
+            messagebox.showerror("Hata", f"Dosya bulunamadı:\n{filename}")
+
+    # -------------------- Fiş Aç / Yazdır --------------------
+    def open_selected_receipt():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Uyarı", "Lütfen bir satış seçin.")
+            return
+        vals = tree.item(sel[0])["values"]
+        fis_id = vals[0] if len(vals) > 0 else None
+        if not fis_id:
+            messagebox.showwarning("Uyarı", "Seçilen satışa ait fiş bulunamadı.")
+            return
+
+        cursor.execute("SELECT product_name, quantity, total FROM sales WHERE fis_id=?", (fis_id,))
+        rows = cursor.fetchall()
+        if not rows:
+            messagebox.showerror("Hata", "Bu fiş bulunamadı veya silinmiş.")
+            return
+
+        # PDF olarak yeniden yazdır
+        sales_list = [(r[0], r[1], r[2]/r[1], r[2]) for r in rows]
+        total_sum = sum([r[3] for r in sales_list])
+        print_receipt(sales_list, total_sum, fis_id)
+
+    # -------------------- Butonlar --------------------
+    btns = ttk.Frame(win, style="Card.TFrame")
+    btns.pack(fill="x", padx=14, pady=(0,14))
+    ttk.Button(btns, text="🔍 Listele", command=load_report).pack(side="left", padx=6, pady=8)
+    ttk.Button(btns, text="📤 CSV Dışa Aktar", command=export_filtered_csv).pack(side="left", padx=6, pady=8)
+    ttk.Button(btns, text="🧾 Fiş Aç / Yazdır", command=open_selected_receipt).pack(side="left", padx=6, pady=8)
+
+    # Varsayılan olarak bugünün satışlarını yükle
+    load_report()
+
+
+# ==========================
+# Günlük Satış Raporu (Hızlı)
+# ==========================
 def export_daily_report():
     today = datetime.now().strftime("%Y-%m-%d")
     filename = f"reports/rapor_{today}.csv"
 
-    # "reports" klasörü yoksa oluştur
     if not os.path.exists("reports"):
         os.makedirs("reports")
 
-    cursor.execute("SELECT product_name, quantity, total FROM sales")
+    cursor.execute("""
+        SELECT product_name, quantity, total
+        FROM sales
+        WHERE date(created_at) = date('now', 'localtime')
+    """)
     sales_data = cursor.fetchall()
 
     if not sales_data:
         messagebox.showinfo("Bilgi", "Bugün için kayıtlı satış yok.")
         return
 
-    # CSV dosyasını oluştur
     with open(filename, "w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow(["Ürün Adı", "Adet", "Toplam ₺"])
-        writer.writerows(sales_data)
+        for row in sales_data:
+            pname, qty, total = row
+            writer.writerow([pname, qty, f"{float(total):.2f}"])
 
-    # Bilgi mesajı
     messagebox.showinfo("Başarılı", f"Günlük rapor kaydedildi:\n{filename}")
-
-    # Varsayılan programda (örneğin Excel) aç
     try:
-        if os.name == 'nt':  # Windows
+        if os.name == 'nt':
             os.startfile(filename)
-        elif os.name == 'posix':  # macOS veya Linux
+        else:
             subprocess.call(('open', filename))
     except Exception as e:
         messagebox.showerror("Hata", f"Rapor açılırken hata oluştu:\n{e}")
 
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
+import tempfile
+import platform
+import subprocess
+
+def print_receipt(sales_list, total_amount, fis_id=""):
+    import tempfile
+    today = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    # PDF'leri geçici klasörde oluştur
+    temp_dir = os.path.join(tempfile.gettempdir(), "SmartPOS_Receipts")
+    os.makedirs(temp_dir, exist_ok=True)
+    filename = os.path.join(temp_dir, f"{fis_id or 'fis'}_{today}.pdf")
+
+    # PDF oluştur
+    c = canvas.Canvas(filename, pagesize=A4)
+    width, height = A4
+    y = height - 40*mm
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(25*mm, y, "SMARTPOS MINI PRO - SATIŞ FİŞİ")
+    y -= 8*mm
+    c.setFont("Helvetica", 10)
+    c.drawString(25*mm, y, f"Fiş No: {fis_id}")
+    y -= 6*mm
+    c.drawString(25*mm, y, f"Tarih: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    y -= 8*mm
+    c.drawString(25*mm, y, "-"*75)
+    y -= 6*mm
+
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(25*mm, y, "Ürün")
+    c.drawString(90*mm, y, "Adet")
+    c.drawString(110*mm, y, "Fiyat")
+    c.drawString(135*mm, y, "Tutar")
+    y -= 5*mm
+    c.setFont("Helvetica", 10)
+    c.drawString(25*mm, y, "-"*75)
+    y -= 6*mm
+
+    for pname, qty, price, subtotal in sales_list:
+        c.drawString(25*mm, y, str(pname)[:25])
+        c.drawRightString(102*mm, y, str(qty))
+        c.drawRightString(128*mm, y, f"{price:.2f}")
+        c.drawRightString(155*mm, y, f"{subtotal:.2f}")
+        y -= 6*mm
+        if y < 50*mm:
+            c.showPage()
+            y = height - 40*mm
+
+    y -= 8*mm
+    c.drawString(25*mm, y, "-"*75)
+    y -= 10*mm
+    c.setFont("Helvetica-Bold", 12)
+    c.drawRightString(155*mm, y, f"Toplam: {total_amount:.2f} ₺")
+    y -= 10*mm
+    c.setFont("Helvetica", 10)
+    c.drawString(25*mm, y, "Teşekkür ederiz 💙 SmartPOS Mini Pro")
+    c.save()
+
+    # PDF aç
+    import time
+    time.sleep(0.5)
+    if os.path.exists(filename):
+        try:
+            os.startfile(filename)
+        except Exception:
+            pass
+    messagebox.showinfo("Fiş Oluşturuldu", f"Fatura kaydedildi:\n{filename}")
 
 
 # ==========================
-# Giriş Ekranı Başlat
+# Ana Pencere
 # ==========================
-login_window = tk.Tk()
-login_window.title("SmartPOS Mini Giriş")
-login_window.geometry("320x350")
-set_theme(login_window)
+def open_main_window(role):
+    main = tk.Toplevel()
+    main.title(f"{APP_TITLE} - {role.upper()}")
+    set_theme(main)
+    center_window(main, 520, 520)
 
-show_logo(login_window)
+    ttk.Label(main, text=f"{APP_TITLE} — {role.title()} Paneli", style="Header.TLabel").pack(pady=(16, 6))
+    ttk.Label(main, text="Küçük işletmeler için satış & stok sistemi", style="Sub.TLabel").pack(pady=(0, 14))
 
-ttk.Label(login_window, text="SmartPOS Mini Giriş", style="Header.TLabel").pack(pady=10)
-ttk.Label(login_window, text="Kullanıcı Adı:").pack()
-entry_username = ttk.Entry(login_window)
-entry_username.pack(pady=5)
-ttk.Label(login_window, text="Şifre:").pack()
-entry_password = ttk.Entry(login_window, show="*")
-entry_password.pack(pady=5)
+    btn_frame = ttk.Frame(main, style="Card.TFrame")
+    btn_frame.pack(padx=24, pady=10, fill="x")
 
-ttk.Button(login_window, text="Giriş Yap", command=login).pack(pady=15)
+    # Admin butonları
+    if role == "admin":
+        ttk.Button(btn_frame, text="🧾 Ürün Yönetimi", command=product_management_window).pack(pady=8, ipadx=20, fill="x", padx=20)
+        ttk.Button(btn_frame, text="👥 Kullanıcı Yönetimi", command=manage_users_window).pack(pady=8, ipadx=20, fill="x", padx=20)
+        ttk.Separator(btn_frame).pack(fill="x", padx=20, pady=6)
 
-login_window.mainloop()
+    ttk.Button(btn_frame, text="💰 Satış Yap", command=sell_product_window).pack(pady=8, ipadx=20, fill="x", padx=20)
+    ttk.Button(btn_frame, text="🧾 Fişleri Görüntüle / Yazdır", command=show_receipts_window).pack(pady=8, ipadx=20, fill="x", padx=20)
+    ttk.Button(btn_frame, text="📊 Raporlar (Tarih Filtresi)", command=show_report_window).pack(pady=8, ipadx=20, fill="x", padx=20)
+    ttk.Button(btn_frame, text="💾 Günlük Raporu Kaydet", command=export_daily_report).pack(pady=8, ipadx=20, fill="x", padx=20)
+
+    ttk.Button(main, text="🔓 Çıkış Yap", command=lambda: logout_and_restart(main)).pack(pady=16)
+
+    ttk.Label(main, text=f"{APP_TITLE} {APP_VERSION} © Ümit Topuz", style="Sub.TLabel").pack(side="bottom", pady=10)
+
+# ==========================
+# Logout
+# ==========================
+def logout_and_restart(window):
+    try:
+        window.destroy()
+    except:
+        pass
+    try:
+        login_window.destroy()
+    except:
+        pass
+    os.execl(sys.executable, sys.executable, *sys.argv)
+
+def show_receipts_window():
+    win = tk.Toplevel()
+    win.title("Fişleri Görüntüle / Yazdır")
+    set_theme(win)
+    center_window(win, 600, 400)
+
+    ttk.Label(win, text="Kaydedilmiş Fişler", style="Header.TLabel").pack(pady=(10, 5))
+
+    frm = ttk.Frame(win, style="Card.TFrame")
+    frm.pack(fill="both", expand=True, padx=16, pady=10)
+
+    tree = ttk.Treeview(frm, columns=("Dosya", "Tarih"), show="headings")
+    tree.heading("Dosya", text="Fiş Adı")
+    tree.heading("Tarih", text="Oluşturulma Tarihi")
+    tree.column("Dosya", width=400)
+    tree.column("Tarih", width=150)
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+
+    # Fişleri listele
+    import tempfile, glob
+    temp_dir = os.path.join(tempfile.gettempdir(), "SmartPOS_Receipts")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    files = sorted(glob.glob(os.path.join(temp_dir, "*.pdf")), reverse=True)
+    for f in files:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(f)))
+        tree.insert("", "end", values=(os.path.basename(f), ts))
+
+    def open_selected_receipt():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Uyarı", "Lütfen bir fiş seçin.")
+            return
+        fname = tree.item(sel[0])["values"][0]
+        full_path = os.path.join(temp_dir, fname)
+        if os.path.exists(full_path):
+            try:
+                os.startfile(full_path)
+            except Exception as e:
+                messagebox.showerror("Hata", f"Fiş açılamadı:\n{e}")
+        else:
+            messagebox.showerror("Hata", "Dosya bulunamadı.")
+
+    ttk.Button(win, text="🖨 Fişi Aç / Yazdır", command=open_selected_receipt).pack(pady=8)
+
+# ==========================
+# Giriş Ekranı
+# ==========================
+def start_login_screen():
+    global login_window, entry_username, entry_password, btn_toggle_pw
+    login_window = tk.Tk()
+    login_window.title(f"{APP_TITLE} Giriş")
+    set_theme(login_window)
+    center_window(login_window, 420, 520)
+
+    show_logo(login_window)
+    ttk.Label(login_window, text=APP_TITLE, style="Header.TLabel").pack(pady=(6, 4))
+    ttk.Label(login_window, text="Küçük işletmeler için satış sistemi", style="Sub.TLabel").pack(pady=(0, 12))
+
+    frame = ttk.Frame(login_window, style="Card.TFrame")
+    frame.pack(pady=10, padx=24, fill="x")
+
+    ttk.Label(frame, text="Kullanıcı Adı:").pack(pady=(16, 4), anchor="w")
+    entry_username = ttk.Entry(frame, font=("Segoe UI", 10))
+    entry_username.pack(pady=(0, 8), ipady=3, fill="x", padx=16)
+
+    ttk.Label(frame, text="Şifre:").pack(pady=(8, 4), anchor="w")
+    pw_row = ttk.Frame(frame, style="Card.TFrame")
+    pw_row.pack(fill="x", padx=16)
+    entry_password = ttk.Entry(pw_row, show="*", font=("Segoe UI", 10))
+    entry_password.pack(side="left", fill="x", expand=True)
+    btn_toggle_pw = ttk.Button(pw_row, text="👁 Göster", command=toggle_password)
+    btn_toggle_pw.pack(side="left", padx=(8,0))
+
+    ttk.Button(frame, text="Giriş Yap", command=login_action).pack(pady=20, ipadx=20)
+
+    # Enter ile giriş
+    login_window.bind("<Return>", lambda e: login_action())
+
+    ttk.Label(login_window, text=f"{APP_VERSION}", style="Sub.TLabel").pack(side="bottom", pady=10)
+
+    login_window.mainloop()
+
+# ==========================
+# Çalıştır
+# ==========================
+if __name__ == "__main__":
+    start_login_screen()
