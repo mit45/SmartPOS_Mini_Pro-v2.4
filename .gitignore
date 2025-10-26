@@ -1,0 +1,62 @@
+# 🧠 Python cache dosyaları
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 🐍 Sanal ortam klasörleri
+.venv/
+venv/
+env/
+ENV/
+
+# 📦 Bağımlılık dosyaları (pip, dist, vs.)
+*.egg-info/
+*.egg
+dist/
+build/
+wheels/
+
+# ⚙️ IDE / Editör ayarları
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# 🪟 Windows sistem dosyaları
+Thumbs.db
+Desktop.ini
+
+# 💻 Mac sistem dosyaları
+.DS_Store
+
+# 🔑 Ortam değişkenleri / gizli bilgiler
+.env
+.env.*
+
+# 🧾 Log dosyaları
+*.log
+logs/
+*.bak
+
+# 📊 SQLite veya yerel veritabanı dosyaları
+*.sqlite3
+*.db
+
+# 🧱 Proje özel dosyaları (geçici)
+tmp/
+temp/
+cache/
+
+# 📁 Pycharm / VSCode ayarları
+.vscode/
+.idea/
+
+# 🧰 Local test dosyaları veya not defterleri
+*.ipynb_checkpoints
+
+# ⚙️ Uygulama özel dosyaları (örnek: derlenmiş exe çıktısı)
+*.exe
+
+# 📂 FastAPI, Flask, Django static / media (eğer varsa)
+media/
+staticfiles/
