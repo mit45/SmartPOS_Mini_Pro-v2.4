@@ -1,62 +1,92 @@
-# 🧠 Python cache dosyaları
+# =========================
+# 🧠 PYTHON & FASTAPI PROJE GİTIGNORE
+# =========================
+
+# 🐍 Derlenmiş Python dosyaları
 __pycache__/
 *.py[cod]
 *$py.class
 
-# 🐍 Sanal ortam klasörleri
+# 🧩 Sanal ortam klasörleri
 .venv/
 venv/
 env/
 ENV/
 
-# 📦 Bağımlılık dosyaları (pip, dist, vs.)
+# 🪄 PyInstaller / cx_Freeze çıktıları (exe oluşturma)
+# Bu klasörler PyInstaller build’lerinde oluşur
+build/
+dist/
+*.spec
+*.exe
+
+# 📦 Paketleme / bağımlılık dosyaları
 *.egg-info/
 *.egg
-dist/
-build/
 wheels/
 
-# ⚙️ IDE / Editör ayarları
+# 🧱 Geçici dosyalar
+tmp/
+temp/
+cache/
+*.log
+logs/
+*.bak
+*.tmp
+
+# 🗃️ Veritabanı dosyaları
+*.sqlite3
+*.db
+
+# 🔐 Ortam değişkenleri (API key, secret, vs.)
+.env
+.env.*
+
+# 🧰 IDE ve editör dosyaları
 .vscode/
 .idea/
 *.sublime-project
 *.sublime-workspace
 
-# 🪟 Windows sistem dosyaları
+# 💻 Sistem dosyaları
 Thumbs.db
 Desktop.ini
-
-# 💻 Mac sistem dosyaları
 .DS_Store
 
-# 🔑 Ortam değişkenleri / gizli bilgiler
-.env
-.env.*
-
-# 🧾 Log dosyaları
-*.log
-logs/
-*.bak
-
-# 📊 SQLite veya yerel veritabanı dosyaları
-*.sqlite3
-*.db
-
-# 🧱 Proje özel dosyaları (geçici)
-tmp/
-temp/
-cache/
-
-# 📁 Pycharm / VSCode ayarları
-.vscode/
-.idea/
-
-# 🧰 Local test dosyaları veya not defterleri
+# 📄 Jupyter veya test not defterleri
 *.ipynb_checkpoints
 
-# ⚙️ Uygulama özel dosyaları (örnek: derlenmiş exe çıktısı)
-*.exe
-
-# 📂 FastAPI, Flask, Django static / media (eğer varsa)
+# 📁 Static / media klasörleri (eğer FastAPI veya web arayüz varsa)
 media/
 staticfiles/
+uploads/
+
+# 🧪 Test dosyaları
+tests/__pycache__/
+tests/*.pyc
+
+# =========================
+# 🚀 SMARTPOS_MİNİ ÖZEL BÖLÜMÜ
+# =========================
+
+# 💾 PyInstaller çalıştırıldığında oluşturulan exe ve geçici dosyalar
+SmartPOS_mini.exe
+SmartPOS_mini.spec
+output/
+installer/
+SmartPOSMiniSetup/
+SmartPOS_mini_build/
+
+# 📈 Rapor / veri çıktıları (kullanıcı logları veya günlük raporlar)
+reports/
+daily_reports/
+backup/
+
+# =========================
+# 🌐 Web veya SaaS sürüm dosyaları (eğer eklenecekse)
+# =========================
+node_modules/
+package-lock.json
+yarn.lock
+.next/
+out/
