@@ -5,6 +5,10 @@ import os, sys, csv, subprocess
 from datetime import datetime, date
 from PIL import Image, ImageTk  # pip install pillow
 import time
+from tkinter import simpledialog
+from reportlab.lib.styles import ParagraphStyle
+
+
 
 
 # ==========================
@@ -20,13 +24,6 @@ TEXT_GRAY = "#b8b8b8"
 APP_TITLE = "SmartPOS Mini Pro"
 APP_VERSION = "v2.1"
 
-def center_window(win, w=480, h=460):
-    win.update_idletasks()
-    screen_w = win.winfo_screenwidth()
-    screen_h = win.winfo_screenheight()
-    x = int((screen_w/2) - (w/2))
-    y = int((screen_h/2) - (h/2))
-    win.geometry(f"{w}x{h}+{x}+{y}")
 
 def set_theme(window):
     style = ttk.Style()
@@ -65,6 +62,19 @@ def set_theme(window):
                     font=("Segoe UI", 10, "bold"))
     style.map("Treeview", background=[("selected", "#004e75")])
 
+def center_window(win, width=600, height=500):
+    screen_w = win.winfo_screenwidth()
+    screen_h = win.winfo_screenheight()
+
+    # Ekrana göre otomatik küçültme (örneğin 1366x768 ekranlarda)
+    width = min(width, int(screen_w * 0.9))
+    height = min(height, int(screen_h * 0.9))
+
+    x = (screen_w // 2) - (width // 2)
+    y = (screen_h // 2) - (height // 2)
+    win.geometry(f"{width}x{height}+{x}+{y}")
+    
+    
 def show_logo(parent):
     try:
         if os.path.exists("smartpos_logo.png"):
@@ -177,7 +187,7 @@ def product_management_window():
     win = tk.Toplevel()
     win.title("Ürün Yönetimi")
     set_theme(win)
-    center_window(win, 560, 460)
+    center_window(win, 560, 660)
 
     header = ttk.Frame(win, style="Card.TFrame")
     header.pack(fill="x", padx=14, pady=(14, 8))
@@ -220,7 +230,7 @@ def product_management_window():
         dlg = tk.Toplevel(win)
         dlg.title("Ürün Ekle")
         set_theme(dlg)
-        center_window(dlg, 360, 280)
+        center_window(dlg, 360, 480)
 
         frm = ttk.Frame(dlg, style="Card.TFrame")
         frm.pack(fill="both", expand=True, padx=16, pady=16)
@@ -266,7 +276,7 @@ def product_management_window():
         dlg = tk.Toplevel(win)
         dlg.title("Ürün Düzenle")
         set_theme(dlg)
-        center_window(dlg, 360, 300)
+        center_window(dlg, 360, 500)
 
         frm = ttk.Frame(dlg, style="Card.TFrame")
         frm.pack(fill="both", expand=True, padx=16, pady=16)
@@ -337,7 +347,7 @@ def add_user_window(parent=None):
     win = tk.Toplevel(parent)
     win.title("Yeni Kullanıcı Oluştur")
     set_theme(win)
-    center_window(win, 360, 320)
+    center_window(win, 360, 520)
 
     frm = ttk.Frame(win, style="Card.TFrame")
     frm.pack(fill="both", expand=True, padx=16, pady=16)
@@ -376,7 +386,7 @@ def manage_users_window():
     win = tk.Toplevel()
     win.title("Kullanıcı Yönetimi")
     set_theme(win)
-    center_window(win, 520, 420)
+    center_window(win, 520, 620)
 
     ttk.Label(win, text="Kayıtlı Kullanıcılar", style="Header.TLabel").pack(pady=(14, 6))
 
@@ -412,7 +422,7 @@ def manage_users_window():
         dlg = tk.Toplevel(win)
         dlg.title("Kullanıcı Düzenle")
         set_theme(dlg)
-        center_window(dlg, 360, 300)
+        center_window(dlg, 360, 500)
 
         frm = ttk.Frame(dlg, style="Card.TFrame")
         frm.pack(fill="both", expand=True, padx=16, pady=16)
@@ -484,14 +494,34 @@ def manage_users_window():
 # Satış
 # ==========================
 def sell_product_window():
+    import uuid
     win = tk.Toplevel()
-    win.title("Toplu Satış Yap")
+    win.title("Toplu Satış (KDV / İndirimli)")
     set_theme(win)
-    center_window(win, 620, 500)
+    center_window(win, 640, 760)
 
-    ttk.Label(win, text="🛒 Toplu Satış Ekranı", style="Header.TLabel").pack(pady=(10, 5))
-    ttk.Label(win, text="Ürün seç, adet gir ve sepete ekle. En son 'Satışı Onayla' ile tamamla.", style="Sub.TLabel").pack(pady=(0, 10))
+    ttk.Label(win, text="🧾 Toplu Satış Ekranı", style="Header.TLabel").pack(pady=(10, 5))
+    ttk.Label(win, text="Ürünleri sepete ekle, müşteri bilgisi gir, KDV ve indirim uygula.", style="Sub.TLabel").pack(pady=(0, 10))
 
+    # ------------------ ÜST BİLGİLER ------------------
+    top_info = ttk.Frame(win, style="Card.TFrame")
+    top_info.pack(fill="x", padx=16, pady=(4, 10))
+
+    ttk.Label(top_info, text="Müşteri Adı:").grid(row=0, column=0, padx=6, pady=6, sticky="w")
+    customer_entry = ttk.Entry(top_info, width=30)
+    customer_entry.grid(row=0, column=1, padx=6, pady=6)
+
+    ttk.Label(top_info, text="KDV Oranı:").grid(row=0, column=2, padx=6, pady=6, sticky="e")
+    vat_cb = ttk.Combobox(top_info, values=["%8", "%18", "Özel"], state="readonly", width=6)
+    vat_cb.set("%18")
+    vat_cb.grid(row=0, column=3, padx=6, pady=6)
+
+    ttk.Label(top_info, text="İndirim (%):").grid(row=1, column=2, padx=6, pady=6, sticky="e")
+    discount_entry = ttk.Entry(top_info, width=6)
+    discount_entry.insert(0, "0")
+    discount_entry.grid(row=1, column=3, padx=6, pady=6)
+
+    # ------------------ ÜRÜN SEÇİMİ ------------------
     frame_top = ttk.Frame(win, style="Card.TFrame")
     frame_top.pack(fill="x", padx=16, pady=(4, 10))
 
@@ -513,7 +543,6 @@ def sell_product_window():
     lbl_stock = ttk.Label(frame_top, text="-", style="Sub.TLabel")
     lbl_stock.grid(row=1, column=3, sticky="w", padx=6, pady=6)
 
-    # Ürün seçilince fiyat ve stok göster
     def update_info(*_):
         pname = cb_product.get()
         cursor.execute("SELECT price, stock FROM products WHERE name=?", (pname,))
@@ -527,7 +556,7 @@ def sell_product_window():
             lbl_stock.config(text="-")
     cb_product.bind("<<ComboboxSelected>>", update_info)
 
-    # Sepet tablo
+    # ------------------ SEPET TABLOSU ------------------
     frame_mid = ttk.Frame(win, style="Card.TFrame")
     frame_mid.pack(fill="both", expand=True, padx=16, pady=10)
 
@@ -544,7 +573,10 @@ def sell_product_window():
     total_label = ttk.Label(win, text="Toplam: 0.00 ₺", style="Header.TLabel")
     total_label.pack(pady=8)
 
-    # Sepete ekle
+    def update_total_label():
+        total_sum = sum([float(tree.item(row)["values"][3]) for row in tree.get_children()])
+        total_label.config(text=f"Ara Toplam: {total_sum:.2f} ₺")
+
     def add_to_cart():
         pname = cb_product.get().strip()
         qty = parse_int_safe(e_qty.get(), None)
@@ -566,40 +598,34 @@ def sell_product_window():
         tree.insert("", "end", values=(pname, qty, f"{price:.2f}", f"{total:.2f}"))
         update_total_label()
 
-    def update_total_label():
-        total_sum = 0.0
-        for row in tree.get_children():
-            vals = tree.item(row)["values"]
-            total_sum += float(vals[3])
-        total_label.config(text=f"Toplam: {total_sum:.2f} ₺")
-
     def remove_selected():
-        sel = tree.selection()
-        for s in sel:
+        for s in tree.selection():
             tree.delete(s)
         update_total_label()
 
+    # ------------------ BUTONLAR ------------------
     frame_btns = ttk.Frame(win, style="Card.TFrame")
     frame_btns.pack(fill="x", padx=16, pady=(0, 10))
 
     ttk.Button(frame_btns, text="➕ Sepete Ekle", command=add_to_cart).pack(side="left", padx=6, pady=6)
     ttk.Button(frame_btns, text="🗑 Seçiliyi Kaldır", command=remove_selected).pack(side="left", padx=6, pady=6)
 
-    # Satışı onayla
-    import uuid
-
+    # ------------------ SATIŞ ONAY ------------------
     def confirm_sale():
         rows = tree.get_children()
         if not rows:
             messagebox.showwarning("Uyarı", "Sepet boş.")
             return
 
-        # Her satış grubuna benzersiz fiş numarası
+        customer_name = customer_entry.get().strip() or "Müşteri"
+        kdv_text = vat_cb.get()
+        discount_val = parse_float_safe(discount_entry.get(), 0.0)
+
+        # Fiş numarası üret
         fis_id = f"FIS-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:5].upper()}"
 
         sales_list = []
-        total_amount = 0.0
-
+        subtotal = 0.0
         for row in rows:
             pname, qty, price, total = tree.item(row)["values"]
             qty = int(qty)
@@ -611,19 +637,26 @@ def sell_product_window():
                 VALUES (?, ?, ?, ?)
             """, (pname, qty, total, fis_id))
             sales_list.append((pname, qty, price, total))
-            total_amount += total
+            subtotal += total
+
+        # İndirim ve KDV hesapla
+        discount_amount = subtotal * (discount_val / 100)
+        subtotal_after_discount = subtotal - discount_amount
+        vat_rate = 8 if kdv_text == "%8" else 18 if kdv_text == "%18" else parse_float_safe(simpledialog.askstring("Özel KDV", "KDV oranını gir (%):"), 0)
+        vat_amount = subtotal_after_discount * (vat_rate / 100)
+        grand_total = subtotal_after_discount + vat_amount
 
         conn.commit()
 
         # PDF fatura yazdır
-        print_receipt(sales_list, total_amount, fis_id)
+        print_receipt(sales_list, grand_total, fis_id, customer_name, vat_rate, discount_val)
 
-        messagebox.showinfo("Satış Tamamlandı", f"Satış başarıyla kaydedildi.\nFiş No: {fis_id}\nToplam: {total_amount:.2f} ₺")
+        messagebox.showinfo("Satış Tamamlandı",
+                            f"Satış başarıyla kaydedildi.\nMüşteri: {customer_name}\nFiş No: {fis_id}\nToplam: {grand_total:.2f} ₺")
         win.destroy()
 
-
-
     ttk.Button(win, text="✅ Satışı Onayla", command=confirm_sale).pack(pady=(0, 12))
+
 
 
 
@@ -634,7 +667,7 @@ def show_report_window():
     win = tk.Toplevel()
     win.title("Satış Raporu")
     set_theme(win)
-    center_window(win, 640, 480)
+    center_window(win, 740, 680)
 
     header = ttk.Frame(win, style="Card.TFrame")
     header.pack(fill="x", padx=14, pady=(14, 8))
@@ -836,63 +869,83 @@ from reportlab.pdfgen import canvas
 import tempfile
 import platform
 import subprocess
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.styles import getSampleStyleSheet
 
-def print_receipt(sales_list, total_amount, fis_id=""):
-    import tempfile
+# Türkçe karakter desteği
+pdfmetrics.registerFont(TTFont('DejaVu', 'fonts/DejaVuSans.ttf'))
+
+
+def print_receipt(sales_list, total_amount, fis_id="", customer_name="Müşteri", kdv_rate: float = 18.0, discount_rate: float = 0.0):
+    import tempfile, time
     today = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    # PDF'leri geçici klasörde oluştur
     temp_dir = os.path.join(tempfile.gettempdir(), "SmartPOS_Receipts")
     os.makedirs(temp_dir, exist_ok=True)
     filename = os.path.join(temp_dir, f"{fis_id or 'fis'}_{today}.pdf")
 
-    # PDF oluştur
     c = canvas.Canvas(filename, pagesize=A4)
     width, height = A4
     y = height - 40*mm
-    c.setFont("Helvetica-Bold", 14)
+
+    c.setFont("DejaVu", 14)
     c.drawString(25*mm, y, "SMARTPOS MINI PRO - SATIŞ FİŞİ")
     y -= 8*mm
-    c.setFont("Helvetica", 10)
+    c.setFont("DejaVu", 10)
     c.drawString(25*mm, y, f"Fiş No: {fis_id}")
+    y -= 6*mm
+    c.drawString(25*mm, y, f"Müşteri: {customer_name}")
     y -= 6*mm
     c.drawString(25*mm, y, f"Tarih: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
     y -= 8*mm
     c.drawString(25*mm, y, "-"*75)
     y -= 6*mm
 
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont("DejaVu", 10)
     c.drawString(25*mm, y, "Ürün")
     c.drawString(90*mm, y, "Adet")
     c.drawString(110*mm, y, "Fiyat")
     c.drawString(135*mm, y, "Tutar")
     y -= 5*mm
-    c.setFont("Helvetica", 10)
+    c.setFont("DejaVu", 10)
     c.drawString(25*mm, y, "-"*75)
     y -= 6*mm
 
-    for pname, qty, price, subtotal in sales_list:
+    subtotal = 0
+    for pname, qty, price, subtotal_item in sales_list:
         c.drawString(25*mm, y, str(pname)[:25])
         c.drawRightString(102*mm, y, str(qty))
         c.drawRightString(128*mm, y, f"{price:.2f}")
-        c.drawRightString(155*mm, y, f"{subtotal:.2f}")
+        c.drawRightString(155*mm, y, f"{subtotal_item:.2f}")
         y -= 6*mm
+        subtotal += subtotal_item
         if y < 50*mm:
             c.showPage()
             y = height - 40*mm
 
-    y -= 8*mm
+    discount_amt = subtotal * (discount_rate / 100)
+    after_discount = subtotal - discount_amt
+    kdv_amt = after_discount * (kdv_rate / 100)
+    grand_total = after_discount + kdv_amt
+
+    y -= 10*mm
     c.drawString(25*mm, y, "-"*75)
     y -= 10*mm
-    c.setFont("Helvetica-Bold", 12)
-    c.drawRightString(155*mm, y, f"Toplam: {total_amount:.2f} ₺")
+    c.setFont("DejaVu", 10)
+    c.drawRightString(155*mm, y, f"Ara Toplam: {subtotal:.2f} ₺")
+    y -= 6*mm
+    c.drawRightString(155*mm, y, f"İndirim ({discount_rate:.1f}%): -{discount_amt:.2f} ₺")
+    y -= 6*mm
+    c.drawRightString(155*mm, y, f"KDV ({kdv_rate:.1f}%): +{kdv_amt:.2f} ₺")
     y -= 10*mm
-    c.setFont("Helvetica", 10)
-    c.drawString(25*mm, y, "Teşekkür ederiz 💙 SmartPOS Mini Pro")
+    c.setFont("DejaVu", 12)
+    c.drawRightString(155*mm, y, f"Genel Toplam: {grand_total:.2f} ₺")
+    y -= 10*mm
+    c.setFont("DejaVu", 10)
+    c.drawString(25*mm, y, "Teşekkür ederiz - SmartPOS Mini Pro")
     c.save()
 
-    # PDF aç
-    import time
     time.sleep(0.5)
     if os.path.exists(filename):
         try:
@@ -902,6 +955,7 @@ def print_receipt(sales_list, total_amount, fis_id=""):
     messagebox.showinfo("Fiş Oluşturuldu", f"Fatura kaydedildi:\n{filename}")
 
 
+
 # ==========================
 # Ana Pencere
 # ==========================
@@ -909,7 +963,7 @@ def open_main_window(role):
     main = tk.Toplevel()
     main.title(f"{APP_TITLE} - {role.upper()}")
     set_theme(main)
-    center_window(main, 520, 520)
+    center_window(main, 520, 720)
 
     ttk.Label(main, text=f"{APP_TITLE} — {role.title()} Paneli", style="Header.TLabel").pack(pady=(16, 6))
     ttk.Label(main, text="Küçük işletmeler için satış & stok sistemi", style="Sub.TLabel").pack(pady=(0, 14))
@@ -950,7 +1004,7 @@ def show_receipts_window():
     win = tk.Toplevel()
     win.title("Fişleri Görüntüle / Yazdır")
     set_theme(win)
-    center_window(win, 600, 400)
+    center_window(win, 600, 600)
 
     ttk.Label(win, text="Kaydedilmiş Fişler", style="Header.TLabel").pack(pady=(10, 5))
 
@@ -999,7 +1053,7 @@ def start_login_screen():
     login_window = tk.Tk()
     login_window.title(f"{APP_TITLE} Giriş")
     set_theme(login_window)
-    center_window(login_window, 420, 520)
+    center_window(login_window, 420, 720)
 
     show_logo(login_window)
     ttk.Label(login_window, text=APP_TITLE, style="Header.TLabel").pack(pady=(6, 4))
