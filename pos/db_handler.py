@@ -31,6 +31,7 @@ def init_schema(conn, cursor):
     CREATE TABLE IF NOT EXISTS products(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT UNIQUE,
+      barcode TEXT,
       price REAL DEFAULT 0,
       stock INTEGER DEFAULT 0
     )""")
@@ -57,6 +58,13 @@ def init_schema(conn, cursor):
             sql_type = 'TEXT' if need in ('fis_id', 'payment_method') else ('INTEGER' if need=='canceled' else 'REAL')
             cursor.execute(f"ALTER TABLE sales ADD COLUMN {need} {sql_type}")
             conn.commit()
+
+    # Backfill products barcode column
+    cursor.execute("PRAGMA table_info(products)")
+    prod_cols = {c[1] for c in cursor.fetchall()}
+    if "barcode" not in prod_cols:
+        cursor.execute("ALTER TABLE products ADD COLUMN barcode TEXT")
+        conn.commit()
 
     # Seeds
     cursor.execute("INSERT OR IGNORE INTO users(username,password,role) VALUES (?,?,?)", ("admin","1234","admin"))

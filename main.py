@@ -320,11 +320,12 @@ def mount_products(parent):
     left = ttk.Frame(body, style="Card.TFrame"); left.pack(side="left", fill="both", expand=True, padx=(8,4), pady=8)
     right = ttk.Frame(body, style="Card.TFrame"); right.pack(side="left", fill="y", padx=(4,8), pady=8)
 
-    cols = (t('id'), t('name'), t('price'), t('stock'))
+    cols = (t('id'), t('name'), t('barcode'), t('price'), t('stock'))
     tree = ttk.Treeview(left, columns=cols, show="headings")
     for c in cols: tree.heading(c, text=c)
     tree.column(t('id'), width=60, anchor="center")
-    tree.column(t('name'), anchor="w", width=240)
+    tree.column(t('name'), anchor="w", width=180)
+    tree.column(t('barcode'), anchor="w", width=120)
     tree.column(t('price'), anchor="e", width=100)
     tree.column(t('stock'), anchor="center", width=90)
     tree.pack(fill="both", expand=True, padx=10, pady=10)
@@ -335,15 +336,20 @@ def mount_products(parent):
     e_name = ttk.Entry(right, textvariable=name_var, width=26)
     e_name.grid(row=1, column=0, sticky="ew", padx=10)
 
-    ttk.Label(right, text=t('price')).grid(row=2, column=0, sticky="w", padx=10, pady=(12,4))
+    ttk.Label(right, text=t('barcode')).grid(row=2, column=0, sticky="w", padx=10, pady=(12,4))
+    barcode_var = tk.StringVar()
+    e_barcode = ttk.Entry(right, textvariable=barcode_var, width=26)
+    e_barcode.grid(row=3, column=0, sticky="ew", padx=10)
+
+    ttk.Label(right, text=t('price')).grid(row=4, column=0, sticky="w", padx=10, pady=(12,4))
     price_var = tk.StringVar()
     e_price = ttk.Entry(right, textvariable=price_var, width=26)
-    e_price.grid(row=3, column=0, sticky="ew", padx=10)
+    e_price.grid(row=5, column=0, sticky="ew", padx=10)
 
-    ttk.Label(right, text=t('stock')).grid(row=4, column=0, sticky="w", padx=10, pady=(12,4))
+    ttk.Label(right, text=t('stock')).grid(row=6, column=0, sticky="w", padx=10, pady=(12,4))
     stock_var = tk.StringVar()
     e_stock = ttk.Entry(right, textvariable=stock_var, width=26)
-    e_stock.grid(row=5, column=0, sticky="ew", padx=10)
+    e_stock.grid(row=7, column=0, sticky="ew", padx=10)
 
     right.grid_columnconfigure(0, weight=1)
 
@@ -357,15 +363,16 @@ def mount_products(parent):
 
     def load(filter_text=""):
         for r in tree.get_children(): tree.delete(r)
-        for pid, name, price, stock in product_svc.list_products(cursor, filter_text):
-            tree.insert("", "end", values=(pid, name, f"{float(price):.2f}", int(stock)))
+        for pid, name, barcode, price, stock in product_svc.list_products(cursor, filter_text):
+            tree.insert("", "end", values=(pid, name, barcode, f"{float(price):.2f}", int(stock)))
 
     def clear_form():
         selected_id["value"] = 0
-        name_var.set(""); price_var.set(""); stock_var.set("")
+        name_var.set(""); barcode_var.set(""); price_var.set(""); stock_var.set("")
 
     def validate_form(require_complete=True):
         name = name_var.get().strip()
+        barcode = barcode_var.get().strip()
         if not name and require_complete:
             messagebox.showwarning(t('warning'), t('product_name'))
             return None
@@ -380,19 +387,20 @@ def mount_products(parent):
         if price is None or stock is None:
             messagebox.showwarning(t('warning'), t('enter_valid'))
             return None
-        return name, price, stock
+        return name, barcode, price, stock
 
     def populate_from_selection(_evt=None):
         sel = tree.selection()
         if not sel:
             clear_form(); return
-        pid, name_cur, price_cur, stock_cur = tree.item(sel[0])["values"]
+        pid, name_cur, barcode_cur, price_cur, stock_cur = tree.item(sel[0])["values"]
         try:
             pid_int = int(pid)
         except Exception:
             pid_int = 0
         selected_id["value"] = pid_int
         name_var.set(name_cur)
+        barcode_var.set(barcode_cur)
         price_var.set(str(price_cur))
         stock_var.set(str(stock_cur))
 
@@ -401,9 +409,9 @@ def mount_products(parent):
     def add_product():
         res = validate_form(require_complete=True)
         if not res: return
-        name, price, stock = res
+        name, barcode, price, stock = res
         try:
-            product_svc.add_product(conn, cursor, name, price, stock)
+            product_svc.add_product(conn, cursor, name, barcode, price, stock)
             load(search_var.get()); clear_form()
         except sqlite3.IntegrityError:
             messagebox.showerror(t('error'), t('duplicate_error'))
@@ -415,9 +423,9 @@ def mount_products(parent):
             return messagebox.showwarning(t('warning'), t('select_item'))
         res = validate_form(require_complete=True)
         if not res: return
-        name, price, stock = res
+        name, barcode, price, stock = res
         try:
-            product_svc.update_product(conn, cursor, selected_id["value"], name, price, stock)
+            product_svc.update_product(conn, cursor, selected_id["value"], name, barcode, price, stock)
             load(search_var.get())
         except sqlite3.IntegrityError:
             messagebox.showerror(t('error'), t('duplicate_error'))
@@ -646,6 +654,14 @@ def mount_sales(parent):
     discount_entry = ttk.Entry(top_info, width=6); discount_entry.insert(0,"0")
     discount_entry.grid(row=1, column=3, padx=6, pady=6)
 
+    # Barkod okuyucu bölümü
+    barcode_frame = ttk.Frame(parent, style="Card.TFrame"); barcode_frame.pack(fill="x", padx=12, pady=8)
+    ttk.Label(barcode_frame, text=t('barcode_scanner'), style="TLabel").pack(side="left", padx=(10,6))
+    barcode_entry = ttk.Entry(barcode_frame, width=30)
+    barcode_entry.pack(side="left", padx=(0,6))
+    barcode_entry.insert(0, t('scan_barcode'))
+    barcode_entry.config(foreground=TEXT_GRAY)
+
     pick = ttk.Frame(parent, style="Card.TFrame"); pick.pack(fill="x", padx=12, pady=8)
     ttk.Label(pick, text=t('product')+":").grid(row=0, column=0, padx=6, pady=6)
     cb_product = ttk.Combobox(pick, values=refresh_product_values_for_combo(), state="readonly", width=28)
@@ -662,6 +678,43 @@ def mount_sales(parent):
 
     from services import product_service as product_svc
     from services import sales_service as sales_svc
+
+    def barcode_focus_in(event):
+        if barcode_entry.get() == t('scan_barcode'):
+            barcode_entry.delete(0, tk.END)
+            barcode_entry.config(foreground=TEXT_LIGHT)
+
+    def barcode_focus_out(event):
+        if not barcode_entry.get().strip():
+            barcode_entry.insert(0, t('scan_barcode'))
+            barcode_entry.config(foreground=TEXT_GRAY)
+
+    def scan_barcode(event):
+        barcode = barcode_entry.get().strip()
+        if not barcode or barcode == t('scan_barcode'):
+            return
+        # Barkoda göre ürün bul
+        result = product_svc.get_by_barcode(cursor, barcode)
+        if not result:
+            messagebox.showwarning(t('warning'), f"Barkod bulunamadı: {barcode}")
+            barcode_entry.delete(0, tk.END)
+            return
+        pid, pname, price, stock = result
+        qty = parse_int_safe(e_qty.get(), 1) or 1
+        if qty > stock:
+            messagebox.showerror(t('error'), f"Yetersiz stok! (Mevcut: {stock})")
+            barcode_entry.delete(0, tk.END)
+            return
+        # Sepete ekle
+        line_total = qty * price
+        tree.insert("", "end", values=(pname, qty, f"{price:.2f}", f"{line_total:.2f}"))
+        update_total_label()
+        barcode_entry.delete(0, tk.END)
+        barcode_entry.focus_set()
+
+    barcode_entry.bind("<FocusIn>", barcode_focus_in)
+    barcode_entry.bind("<FocusOut>", barcode_focus_out)
+    barcode_entry.bind("<Return>", scan_barcode)
 
     def update_info(*_):
         pname = cb_product.get()

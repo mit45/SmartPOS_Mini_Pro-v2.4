@@ -43,6 +43,7 @@ LANGUAGES = {
     "clear_form": "🧹 Formu Temizle",
         "id": "ID",
         "name": "Ad",
+        "barcode": "Barkod",
         "price": "Fiyat",
         "stock": "Stok",
         
@@ -53,6 +54,8 @@ LANGUAGES = {
         
         # Satış
         "sales_screen": "🛒 Satış Ekranı",
+        "barcode_scanner": "Barkod Okuyucu:",
+        "scan_barcode": "Barkodu okutun veya girin",
         "product": "Ürün",
         "quantity": "Adet",
         "unit_price": "Birim Fiyat",
@@ -184,6 +187,7 @@ LANGUAGES = {
     "clear_form": "🧹 Clear Form",
         "id": "ID",
         "name": "Name",
+        "barcode": "Barcode",
         "price": "Price",
         "stock": "Stock",
         
@@ -194,6 +198,8 @@ LANGUAGES = {
         
         # Sales
         "sales_screen": "🛒 Sales Screen",
+        "barcode_scanner": "Barcode Scanner:",
+        "scan_barcode": "Scan or enter barcode",
         "product": "Product",
         "quantity": "Qty",
         "unit_price": "Unit Price",
