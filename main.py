@@ -330,26 +330,30 @@ def mount_products(parent):
     tree.column(t('stock'), anchor="center", width=90)
     tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-    # Tek sayfa form (sağ panel)
-    ttk.Label(right, text=t('name')).grid(row=0, column=0, sticky="w", padx=10, pady=(12,4))
+    # Tek sayfa form (sağ panel) - Modern ve renkli
+    form_header = tk.Label(right, text="📦 ÜRÜN BİLGİLERİ", bg=CARD_COLOR, fg=ACCENT,
+                          font=("Segoe UI", 11, "bold"))
+    form_header.grid(row=0, column=0, sticky="ew", padx=10, pady=(8,16))
+    
+    ttk.Label(right, text=t('name'), font=("Segoe UI", 9, "bold")).grid(row=1, column=0, sticky="w", padx=10, pady=(8,4))
     name_var = tk.StringVar()
-    e_name = ttk.Entry(right, textvariable=name_var, width=26)
-    e_name.grid(row=1, column=0, sticky="ew", padx=10)
+    e_name = ttk.Entry(right, textvariable=name_var, width=26, font=("Segoe UI", 10))
+    e_name.grid(row=2, column=0, sticky="ew", padx=10, ipady=4)
 
-    ttk.Label(right, text=t('barcode')).grid(row=2, column=0, sticky="w", padx=10, pady=(12,4))
+    ttk.Label(right, text=t('barcode'), font=("Segoe UI", 9, "bold")).grid(row=3, column=0, sticky="w", padx=10, pady=(12,4))
     barcode_var = tk.StringVar()
-    e_barcode = ttk.Entry(right, textvariable=barcode_var, width=26)
-    e_barcode.grid(row=3, column=0, sticky="ew", padx=10)
+    e_barcode = ttk.Entry(right, textvariable=barcode_var, width=26, font=("Segoe UI", 10))
+    e_barcode.grid(row=4, column=0, sticky="ew", padx=10, ipady=4)
 
-    ttk.Label(right, text=t('price')).grid(row=4, column=0, sticky="w", padx=10, pady=(12,4))
+    ttk.Label(right, text=t('price'), font=("Segoe UI", 9, "bold")).grid(row=5, column=0, sticky="w", padx=10, pady=(12,4))
     price_var = tk.StringVar()
-    e_price = ttk.Entry(right, textvariable=price_var, width=26)
-    e_price.grid(row=5, column=0, sticky="ew", padx=10)
+    e_price = ttk.Entry(right, textvariable=price_var, width=26, font=("Segoe UI", 11, "bold"))
+    e_price.grid(row=6, column=0, sticky="ew", padx=10, ipady=4)
 
-    ttk.Label(right, text=t('stock')).grid(row=6, column=0, sticky="w", padx=10, pady=(12,4))
+    ttk.Label(right, text=t('stock'), font=("Segoe UI", 9, "bold")).grid(row=7, column=0, sticky="w", padx=10, pady=(12,4))
     stock_var = tk.StringVar()
-    e_stock = ttk.Entry(right, textvariable=stock_var, width=26)
-    e_stock.grid(row=7, column=0, sticky="ew", padx=10)
+    e_stock = ttk.Entry(right, textvariable=stock_var, width=26, font=("Segoe UI", 11, "bold"))
+    e_stock.grid(row=8, column=0, sticky="ew", padx=10, ipady=4)
 
     right.grid_columnconfigure(0, weight=1)
 
@@ -443,11 +447,48 @@ def mount_products(parent):
             except Exception as e:
                 messagebox.showerror(t('error'), str(e))
 
-    ttk.Button(btns, text=t('save'), command=add_product).pack(side="left", padx=6, pady=8)
-    ttk.Button(btns, text=t('update_btn'), command=edit_product).pack(side="left", padx=6, pady=8)
-    ttk.Button(btns, text=t('delete'), command=delete_product).pack(side="left", padx=6, pady=8)
-    ttk.Button(btns, text=t('clear_form'), command=clear_form).pack(side="left", padx=6, pady=8)
-    ttk.Button(btns, text=t('refresh'), command=lambda: load(search_var.get())).pack(side="right", padx=6, pady=8)
+    # Modern butonlar - Ürün yönetimi
+    def create_product_button(parent, text, command, bg_color, icon=""):
+        btn = tk.Button(parent, text=icon + " " + text, command=command,
+                       bg=bg_color, fg="white", font=("Segoe UI", 9, "bold"),
+                       activebackground=bg_color, activeforeground="white",
+                       relief="flat", padx=14, pady=8, cursor="hand2", borderwidth=0)
+        
+        def on_enter(e):
+            factor = 1.15 if bg_color in ["#10b981", "#00b0ff"] else 0.85
+            new_color = adjust_color_brightness(bg_color, factor)
+            btn.config(bg=new_color)
+        
+        def on_leave(e):
+            btn.config(bg=bg_color)
+        
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        btn.pack(side="left", padx=4, pady=8)
+    
+    def adjust_color_brightness(hex_color, factor):
+        hex_color = hex_color.lstrip('#')
+        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+        r = int(min(255, max(0, r * factor)))
+        g = int(min(255, max(0, g * factor)))
+        b = int(min(255, max(0, b * factor)))
+        return f"#{r:02x}{g:02x}{b:02x}"
+    
+    create_product_button(btns, t('save'), add_product, "#10b981", "💾")
+    create_product_button(btns, t('update_btn'), edit_product, "#00b0ff", "🔁")
+    create_product_button(btns, t('delete'), delete_product, "#ef4444", "🗑")
+    create_product_button(btns, t('clear_form'), clear_form, "#6b7280", "🧹")
+    
+    refresh_btn = tk.Button(btns, text="🔄 " + t('refresh'), command=lambda: load(search_var.get()),
+                           bg="#8b5cf6", fg="white", font=("Segoe UI", 9, "bold"),
+                           activebackground="#7c3aed", activeforeground="white",
+                           relief="flat", padx=14, pady=8, cursor="hand2", borderwidth=0)
+    refresh_btn.pack(side="right", padx=4, pady=8)
+    
+    def refresh_hover_in(e): refresh_btn.config(bg="#7c3aed")
+    def refresh_hover_out(e): refresh_btn.config(bg="#8b5cf6")
+    refresh_btn.bind("<Enter>", refresh_hover_in)
+    refresh_btn.bind("<Leave>", refresh_hover_out)
 
     search_var.trace_add("write", lambda *_: load(search_var.get()))
     load()
@@ -636,61 +677,123 @@ def mount_sales(parent):
     ttk.Label(parent, text="Ürünleri sepete ekle, müşteri bilgisi gir, KDV ve indirim uygula.", style="Sub.TLabel").pack()
 
     top_info = ttk.Frame(parent, style="Card.TFrame"); top_info.pack(fill="x", padx=12, pady=10)
-    ttk.Label(top_info, text=t('customer_name')).grid(row=0, column=0, padx=6, pady=6, sticky="w")
-    customer_entry = ttk.Entry(top_info, width=30); customer_entry.grid(row=0, column=1, padx=6, pady=6)
+    
+    # Müşteri adı
+    ttk.Label(top_info, text=t('customer_name'), font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=6, pady=6, sticky="w")
+    customer_entry = ttk.Entry(top_info, width=30, font=("Segoe UI", 10))
+    customer_entry.grid(row=0, column=1, padx=6, pady=6)
 
-    ttk.Label(top_info, text=t('vat')).grid(row=0, column=2, padx=6, pady=6, sticky="e")
-    vat_cb = ttk.Combobox(top_info, values=["%8","%18","Özel"], state="readonly", width=6)
+    # KDV
+    ttk.Label(top_info, text=t('vat'), font=("Segoe UI", 10, "bold")).grid(row=0, column=2, padx=6, pady=6, sticky="e")
+    vat_cb = ttk.Combobox(top_info, values=["%8","%18","Özel"], state="readonly", width=8, font=("Segoe UI", 10))
     vat_cb.set("%18"); vat_cb.grid(row=0, column=3, padx=6, pady=6)
 
-    ttk.Label(top_info, text=t('payment_method')).grid(row=1, column=0, padx=6, pady=6, sticky="w")
+    # Ödeme yöntemi - Modern toggle butonlar
+    ttk.Label(top_info, text=t('payment_method'), font=("Segoe UI", 10, "bold")).grid(row=1, column=0, padx=6, pady=6, sticky="w")
     payment_var = tk.StringVar(value='cash')
-    pm_box = ttk.Frame(top_info, style="Card.TFrame")
+    pm_box = tk.Frame(top_info, bg=BG_COLOR)
     pm_box.grid(row=1, column=1, padx=6, pady=6, sticky="w")
-    ttk.Radiobutton(pm_box, text=t('cash'), variable=payment_var, value='cash').pack(side="left", padx=(0,6))
-    ttk.Radiobutton(pm_box, text=t('credit_card'), variable=payment_var, value='card').pack(side="left")
+    
+    def create_payment_button(parent, text, value, var):
+        def toggle():
+            var.set(value)
+            update_payment_buttons()
+        
+        btn = tk.Button(parent, text=text, command=toggle,
+                       font=("Segoe UI", 9, "bold"), relief="flat",
+                       padx=16, pady=8, cursor="hand2", borderwidth=0)
+        btn.pack(side="left", padx=2)
+        return btn
+    
+    cash_btn = create_payment_button(pm_box, "💵 " + t('cash'), 'cash', payment_var)
+    card_btn = create_payment_button(pm_box, "💳 " + t('credit_card'), 'card', payment_var)
+    
+    def update_payment_buttons():
+        if payment_var.get() == 'cash':
+            cash_btn.config(bg=ACCENT, fg="white", activebackground="#0090dd")
+            card_btn.config(bg="#2a2a35", fg=TEXT_GRAY, activebackground="#3a3a45")
+        else:
+            card_btn.config(bg=ACCENT, fg="white", activebackground="#0090dd")
+            cash_btn.config(bg="#2a2a35", fg=TEXT_GRAY, activebackground="#3a3a45")
+    
+    update_payment_buttons()
 
-    ttk.Label(top_info, text=t('discount')).grid(row=1, column=2, padx=6, pady=6, sticky="e")
-    discount_entry = ttk.Entry(top_info, width=6); discount_entry.insert(0,"0")
+    # İndirim
+    ttk.Label(top_info, text=t('discount'), font=("Segoe UI", 10, "bold")).grid(row=1, column=2, padx=6, pady=6, sticky="e")
+    discount_entry = ttk.Entry(top_info, width=8, font=("Segoe UI", 10))
+    discount_entry.insert(0,"0")
     discount_entry.grid(row=1, column=3, padx=6, pady=6)
 
-    # Barkod okuyucu bölümü
-    barcode_frame = ttk.Frame(parent, style="Card.TFrame"); barcode_frame.pack(fill="x", padx=12, pady=8)
-    ttk.Label(barcode_frame, text=t('barcode_scanner'), style="TLabel").pack(side="left", padx=(10,6))
-    barcode_entry = ttk.Entry(barcode_frame, width=30)
-    barcode_entry.pack(side="left", padx=(0,6))
-    barcode_entry.insert(0, t('scan_barcode'))
-    barcode_entry.config(foreground=TEXT_GRAY)
+    # Barkod okuyucu bölümü - BÜYÜK VE VURGULU
+    barcode_container = tk.Frame(parent, bg="#1a4d2e", relief="solid", borderwidth=2)
+    barcode_container.pack(fill="x", padx=12, pady=12)
+    
+    barcode_inner = tk.Frame(barcode_container, bg="#1a4d2e")
+    barcode_inner.pack(fill="x", padx=3, pady=3)
+    
+    barcode_icon = tk.Label(barcode_inner, text="📷", font=("Segoe UI", 20), bg="#1a4d2e", fg="white")
+    barcode_icon.pack(side="left", padx=(12,8))
+    
+    barcode_label = tk.Label(barcode_inner, text=t('barcode_scanner').upper(), 
+                            font=("Segoe UI", 11, "bold"), bg="#1a4d2e", fg="#4ade80")
+    barcode_label.pack(side="left", pady=8)
+    
+    barcode_entry = tk.Entry(barcode_inner, font=("Segoe UI", 14), width=35,
+                            bg="#ffffff", fg="#000000", insertbackground="#000000",
+                            relief="flat", borderwidth=0)
+    barcode_entry.pack(side="left", padx=(12,12), pady=8, ipady=6)
+    barcode_entry.insert(0, "🔍 " + t('scan_barcode'))
+    
+    # Barkod giriş animasyonu
+    def barcode_animate():
+        current_bg = barcode_container.cget("bg")
+        new_bg = "#1a5d3e" if current_bg == "#1a4d2e" else "#1a4d2e"
+        barcode_container.config(bg=new_bg)
+        barcode_inner.config(bg=new_bg)
+        barcode_icon.config(bg=new_bg)
+        barcode_label.config(bg=new_bg)
+        if barcode_entry.get().strip() and barcode_entry.get() != "🔍 " + t('scan_barcode'):
+            parent.after(150, barcode_animate)
+    
+    barcode_entry.config(foreground="#999999")
 
     pick = ttk.Frame(parent, style="Card.TFrame"); pick.pack(fill="x", padx=12, pady=8)
-    ttk.Label(pick, text=t('product')+":").grid(row=0, column=0, padx=6, pady=6)
-    cb_product = ttk.Combobox(pick, values=refresh_product_values_for_combo(), state="readonly", width=28)
+    
+    # Ürün seçimi
+    ttk.Label(pick, text=t('product')+":", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=6, pady=6)
+    cb_product = ttk.Combobox(pick, values=refresh_product_values_for_combo(), state="readonly", width=28, font=("Segoe UI", 10))
     cb_product.grid(row=0, column=1, padx=6, pady=6)
 
-    ttk.Label(pick, text=t('quantity')+":").grid(row=0, column=2, padx=6, pady=6)
-    e_qty = ttk.Entry(pick, width=6); e_qty.insert(0,"1"); e_qty.grid(row=0, column=3, padx=6, pady=6)
+    ttk.Label(pick, text=t('quantity')+":", font=("Segoe UI", 10, "bold")).grid(row=0, column=2, padx=6, pady=6)
+    e_qty = ttk.Entry(pick, width=8, font=("Segoe UI", 11, "bold"))
+    e_qty.insert(0,"1")
+    e_qty.grid(row=0, column=3, padx=6, pady=6)
 
-    ttk.Label(pick, text=t('price')+":").grid(row=1, column=0, padx=6, pady=6)
-    lbl_price = ttk.Label(pick, text="-", style="Sub.TLabel"); lbl_price.grid(row=1, column=1, sticky="w", padx=6, pady=6)
+    ttk.Label(pick, text=t('price')+":", font=("Segoe UI", 9)).grid(row=1, column=0, padx=6, pady=6)
+    lbl_price = ttk.Label(pick, text="-", style="Sub.TLabel", font=("Segoe UI", 10, "bold"))
+    lbl_price.grid(row=1, column=1, sticky="w", padx=6, pady=6)
 
-    ttk.Label(pick, text=t('stock')+":").grid(row=1, column=2, padx=6, pady=6)
-    lbl_stock = ttk.Label(pick, text="-", style="Sub.TLabel"); lbl_stock.grid(row=1, column=3, sticky="w", padx=6, pady=6)
+    ttk.Label(pick, text=t('stock')+":", font=("Segoe UI", 9)).grid(row=1, column=2, padx=6, pady=6)
+    lbl_stock = ttk.Label(pick, text="-", style="Sub.TLabel", font=("Segoe UI", 10, "bold"))
+    lbl_stock.grid(row=1, column=3, sticky="w", padx=6, pady=6)
 
     from services import product_service as product_svc
     from services import sales_service as sales_svc
 
     def barcode_focus_in(event):
-        if barcode_entry.get() == t('scan_barcode'):
+        current = barcode_entry.get()
+        if "🔍" in current or current == t('scan_barcode'):
             barcode_entry.delete(0, tk.END)
-            barcode_entry.config(foreground=TEXT_LIGHT)
+            barcode_entry.config(foreground="#000000")
+            barcode_animate()
 
     def barcode_focus_out(event):
         if not barcode_entry.get().strip():
-            barcode_entry.insert(0, t('scan_barcode'))
-            barcode_entry.config(foreground=TEXT_GRAY)
+            barcode_entry.insert(0, "🔍 " + t('scan_barcode'))
+            barcode_entry.config(foreground="#999999")
 
     def scan_barcode(event):
-        barcode = barcode_entry.get().strip()
+        barcode = barcode_entry.get().strip().replace("🔍", "").strip()
         if not barcode or barcode == t('scan_barcode'):
             return
         # Barkoda göre ürün bul
@@ -698,19 +801,36 @@ def mount_sales(parent):
         if not result:
             messagebox.showwarning(t('warning'), f"Barkod bulunamadı: {barcode}")
             barcode_entry.delete(0, tk.END)
+            barcode_entry.insert(0, "🔍 " + t('scan_barcode'))
+            barcode_entry.config(foreground="#999999")
             return
         pid, pname, price, stock = result
         qty = parse_int_safe(e_qty.get(), 1) or 1
         if qty > stock:
             messagebox.showerror(t('error'), f"Yetersiz stok! (Mevcut: {stock})")
             barcode_entry.delete(0, tk.END)
+            barcode_entry.insert(0, "🔍 " + t('scan_barcode'))
+            barcode_entry.config(foreground="#999999")
             return
         # Sepete ekle
         line_total = qty * price
         tree.insert("", "end", values=(pname, qty, f"{price:.2f}", f"{line_total:.2f}"))
         update_total_label()
         barcode_entry.delete(0, tk.END)
+        barcode_entry.insert(0, "🔍 " + t('scan_barcode'))
+        barcode_entry.config(foreground="#999999")
         barcode_entry.focus_set()
+        # Başarı efekti
+        barcode_container.config(bg="#15803d")
+        barcode_inner.config(bg="#15803d")
+        barcode_icon.config(bg="#15803d")
+        barcode_label.config(bg="#15803d")
+        parent.after(300, lambda: [
+            barcode_container.config(bg="#1a4d2e"),
+            barcode_inner.config(bg="#1a4d2e"),
+            barcode_icon.config(bg="#1a4d2e"),
+            barcode_label.config(bg="#1a4d2e")
+        ])
 
     barcode_entry.bind("<FocusIn>", barcode_focus_in)
     barcode_entry.bind("<FocusOut>", barcode_focus_out)
@@ -729,13 +849,35 @@ def mount_sales(parent):
 
     mid = ttk.Frame(parent, style="Card.TFrame"); mid.pack(fill="both", expand=True, padx=12, pady=10)
     cols = (t('product'), t('quantity'), t('price'), t('total'))
-    tree = ttk.Treeview(mid, columns=cols, show="headings")
-    for c in cols: tree.heading(c, text=c)
-    tree.column(t('product'), width=280); tree.column(t('quantity'), width=80, anchor="center")
-    tree.column(t('price'), width=100, anchor="e"); tree.column(t('total'), width=110, anchor="e")
+    tree = ttk.Treeview(mid, columns=cols, show="headings", height=12)
+    for c in cols: 
+        tree.heading(c, text=c)
+    tree.column(t('product'), width=280)
+    tree.column(t('quantity'), width=80, anchor="center")
+    tree.column(t('price'), width=100, anchor="e")
+    tree.column(t('total'), width=110, anchor="e")
+    
+    # Zebrastripe ve hover efekti için tag
+    tree.tag_configure('oddrow', background='#1f1f25')
+    tree.tag_configure('evenrow', background='#252530')
+    
+    # Treeview override for hover
+    original_insert = tree.insert
+    def insert_with_tags(*args, **kwargs):
+        item = original_insert(*args, **kwargs)
+        idx = tree.index(item)
+        tree.item(item, tags=('evenrow',) if idx % 2 == 0 else ('oddrow',))
+        return item
+    tree.insert = insert_with_tags
+    
     tree.pack(fill="both", expand=True)
 
-    total_label = ttk.Label(parent, text=f"{t('subtotal')} 0.00 ₺", style="Header.TLabel"); total_label.pack(pady=8)
+    # Toplam etiketi - daha büyük ve vurgulu
+    total_frame = tk.Frame(parent, bg=CARD_COLOR)
+    total_frame.pack(pady=12, fill="x", padx=12)
+    total_label = tk.Label(total_frame, text=f"{t('subtotal')} 0.00 ₺", 
+                          font=("Segoe UI", 18, "bold"), bg=CARD_COLOR, fg=ACCENT)
+    total_label.pack()
 
     def update_total_label():
         total_sum = 0.0
@@ -761,9 +903,34 @@ def mount_sales(parent):
         for s in tree.selection(): tree.delete(s)
         update_total_label()
 
+    # Modern butonlar
     btns = ttk.Frame(parent, style="Card.TFrame"); btns.pack(fill="x", padx=12, pady=(0,10))
-    ttk.Button(btns, text=t('add_to_cart'), command=add_to_cart).pack(side="left", padx=6, pady=6)
-    ttk.Button(btns, text=t('remove_selected'), command=remove_selected).pack(side="left", padx=6, pady=6)
+    
+    def create_action_button(parent, text, command, bg_color, icon=""):
+        btn = tk.Button(parent, text=icon + " " + text, command=command,
+                       bg=bg_color, fg="white", font=("Segoe UI", 10, "bold"),
+                       activebackground=bg_color, activeforeground="white",
+                       relief="flat", padx=16, pady=10, cursor="hand2", borderwidth=0)
+        
+        def on_enter(e):
+            brightness = 1.2 if "00b0ff" in bg_color or "4ade80" in bg_color else 0.8
+            btn.config(bg=adjust_brightness(bg_color, brightness))
+        
+        def on_leave(e):
+            btn.config(bg=bg_color)
+        
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        return btn
+    
+    def adjust_brightness(hex_color, factor):
+        hex_color = hex_color.lstrip('#')
+        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+        r, g, b = int(min(255, r * factor)), int(min(255, g * factor)), int(min(255, b * factor))
+        return f"#{r:02x}{g:02x}{b:02x}"
+    
+    create_action_button(btns, t('add_to_cart'), add_to_cart, "#4ade80", "➕").pack(side="left", padx=6, pady=8)
+    create_action_button(btns, t('remove_selected'), remove_selected, "#ef4444", "❌").pack(side="left", padx=6, pady=8)
 
     def confirm_sale():
         rows = tree.get_children()
@@ -831,8 +998,27 @@ def mount_sales(parent):
         for r in tree.get_children(): tree.delete(r)
         update_total_label()
         cb_product.set(""); lbl_price.config(text="-"); lbl_stock.config(text="-")
+        customer_entry.delete(0, tk.END)
+        discount_entry.delete(0, tk.END); discount_entry.insert(0, "0")
 
-    ttk.Button(parent, text=t('complete_sale'), command=confirm_sale).pack(pady=(0,12))
+    # Satışı tamamla butonu - BÜYÜK VE VURGULU
+    complete_btn_frame = tk.Frame(parent, bg=BG_COLOR)
+    complete_btn_frame.pack(pady=(0,16), fill="x", padx=12)
+    
+    complete_btn = tk.Button(complete_btn_frame, text="✅ " + t('complete_sale').upper(),
+                            command=confirm_sale, bg="#10b981", fg="white",
+                            font=("Segoe UI", 14, "bold"), relief="flat",
+                            padx=40, pady=16, cursor="hand2", borderwidth=0,
+                            activebackground="#059669", activeforeground="white")
+    
+    def complete_hover_in(e):
+        complete_btn.config(bg="#059669")
+    def complete_hover_out(e):
+        complete_btn.config(bg="#10b981")
+    
+    complete_btn.bind("<Enter>", complete_hover_in)
+    complete_btn.bind("<Leave>", complete_hover_out)
+    complete_btn.pack(expand=True)
 
 def mount_cancel_sales(parent):
     for w in parent.winfo_children(): w.destroy()
