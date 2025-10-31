@@ -3,31 +3,31 @@ from typing import List, Tuple, Optional
 from repositories import product_repository as repo
 
 
-def list_products(cursor, filter_text: str = "") -> List[Tuple[int, str, str, float, int]]:
+def list_products(cursor, filter_text: str = "") -> List[Tuple[int, str, str, float, int, float]]:
     q = (filter_text or "").strip()
     if q:
         return repo.search_by_name(cursor, q)
     return repo.list_all(cursor)
 
 
-def add_product(conn, cursor, name: str, barcode: str, price: float, stock: int) -> int:
+def add_product(conn, cursor, name: str, barcode: str, sale_price: float, stock: int, buy_price: float) -> int:
     name = (name or "").strip()
     barcode = (barcode or "").strip()
     if not name:
         raise ValueError("name_required")
-    if price is None or stock is None:
+    if sale_price is None or stock is None:
         raise ValueError("invalid_values")
-    return repo.insert(conn, cursor, name, barcode, float(price), int(stock))
+    return repo.insert(conn, cursor, name, barcode, float(sale_price), int(stock), float(buy_price))
 
 
-def update_product(conn, cursor, pid: int, name: str, barcode: str, price: float, stock: int) -> None:
+def update_product(conn, cursor, pid: int, name: str, barcode: str, sale_price: float, stock: int, buy_price: float) -> None:
     name = (name or "").strip()
     barcode = (barcode or "").strip()
     if not pid:
         raise ValueError("id_required")
     if not name:
         raise ValueError("name_required")
-    repo.update(conn, cursor, int(pid), name, barcode, float(price), int(stock))
+    repo.update(conn, cursor, int(pid), name, barcode, float(sale_price), int(stock), float(buy_price))
 
 
 def delete_product(conn, cursor, pid: int) -> None:

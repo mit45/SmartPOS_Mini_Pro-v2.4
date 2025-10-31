@@ -33,7 +33,9 @@ def init_schema(conn, cursor):
       name TEXT UNIQUE,
       barcode TEXT,
       price REAL DEFAULT 0,
-      stock INTEGER DEFAULT 0
+      stock INTEGER DEFAULT 0,
+      buy_price REAL DEFAULT 0,
+      sale_price REAL
     )""")
 
     # sales
@@ -50,6 +52,30 @@ def init_schema(conn, cursor):
       created_at TEXT DEFAULT (datetime('now','localtime'))
     )""")
 
+    # cariler (accounts receivable/payable)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS cariler(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      phone TEXT,
+      address TEXT,
+      balance REAL DEFAULT 0,
+      cari_type TEXT DEFAULT 'alacakli',
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+
+    # cari_hareketler (account transactions)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS cari_hareketler(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cari_id INTEGER NOT NULL,
+      islem_type TEXT NOT NULL,
+      tutar REAL NOT NULL,
+      aciklama TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY (cari_id) REFERENCES cariler(id)
+    )""")
+
     # Backfill missing columns
     cursor.execute("PRAGMA table_info(sales)")
     existing_cols = {c[1] for c in cursor.fetchall()}
@@ -59,12 +85,24 @@ def init_schema(conn, cursor):
             cursor.execute(f"ALTER TABLE sales ADD COLUMN {need} {sql_type}")
             conn.commit()
 
-    # Backfill products barcode column
+    # Backfill products columns
     cursor.execute("PRAGMA table_info(products)")
     prod_cols = {c[1] for c in cursor.fetchall()}
     if "barcode" not in prod_cols:
         cursor.execute("ALTER TABLE products ADD COLUMN barcode TEXT")
         conn.commit()
+    if "buy_price" not in prod_cols:
+        cursor.execute("ALTER TABLE products ADD COLUMN buy_price REAL DEFAULT 0")
+        conn.commit()
+    if "sale_price" not in prod_cols:
+        cursor.execute("ALTER TABLE products ADD COLUMN sale_price REAL")
+        conn.commit()
+        # migrate existing price to sale_price for compatibility
+        try:
+            cursor.execute("UPDATE products SET sale_price = price WHERE sale_price IS NULL")
+            conn.commit()
+        except Exception:
+            pass
 
     # Seeds
     cursor.execute("INSERT OR IGNORE INTO users(username,password,role) VALUES (?,?,?)", ("admin","1234","admin"))
