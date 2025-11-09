@@ -22,18 +22,19 @@ def mount_products(parent, conn, cursor, t,
     left = ttk.Frame(body, style="Card.TFrame"); left.pack(side="left", fill="both", expand=True, padx=(8,4), pady=8)
     right = ttk.Frame(body, style="Card.TFrame"); right.pack(side="left", fill="y", padx=(4,8), pady=8)
 
-    # Liste kolonları: ID, Ad, Barkod, Satış Fiyatı, Stok, Alış Fiyatı
-    col_id = t('id'); col_name = t('name'); col_barcode = t('barcode'); col_sale = t('price'); col_stock = t('stock'); col_buy = t('buy_price')
-    cols = (col_id, col_name, col_barcode, col_sale, col_stock, col_buy)
+    # Liste kolonları: ID, Ad, Barkod, Satış Fiyatı, Stok, Birim, Alış Fiyatı, Kategori
+    cols = (t('id'), t('name'), t('barcode'), t('sale_price'), t('stock'), t('unit'), t('buy_price'), t('category'))
     tree = ttk.Treeview(left, columns=cols, show="headings")
     for c in cols:
         tree.heading(c, text=c)
-    tree.column(col_id, width=60, anchor="center")
-    tree.column(col_name, anchor="w", width=180)
-    tree.column(col_barcode, anchor="w", width=120)
-    tree.column(col_sale, anchor="e", width=100)
-    tree.column(col_stock, anchor="center", width=90)
-    tree.column(col_buy, anchor="e", width=110)
+    tree.column(t('id'), width=60, anchor="center")
+    tree.column(t('name'), anchor="w", width=160)
+    tree.column(t('barcode'), anchor="w", width=100)
+    tree.column(t('sale_price'), anchor="e", width=90)
+    tree.column(t('stock'), anchor="center", width=80)
+    tree.column(t('unit'), anchor="center", width=60)
+    tree.column(t('buy_price'), anchor="e", width=100)
+    tree.column(t('category'), anchor="center", width=100)
     tree.pack(fill="both", expand=True, padx=10, pady=10)
 
     # Tek sayfa form (sağ panel) - Modern ve renkli
@@ -65,6 +66,33 @@ def mount_products(parent, conn, cursor, t,
     e_stock = ttk.Entry(right, textvariable=stock_var, width=26, font=("Segoe UI", 11, "bold"))
     e_stock.grid(row=10, column=0, sticky="ew", padx=10, ipady=4)
 
+    # Birim seçimi (adet | kg)
+    ttk.Label(right, text=t('unit'), font=("Segoe UI", 9, "bold")).grid(row=11, column=0, sticky="w", padx=10, pady=(12,4))
+    unit_var = tk.StringVar(value='adet')
+    unit_cb = ttk.Combobox(right, textvariable=unit_var, values=[t('adet'), t('kg')], state="readonly", width=24)
+    unit_cb.grid(row=12, column=0, sticky="ew", padx=10, ipady=2)
+
+    # Kategori seçimi
+    ttk.Label(right, text=t('category'), font=("Segoe UI", 9, "bold")).grid(row=13, column=0, sticky="w", padx=10, pady=(12,4))
+    category_var = tk.StringVar()
+    category_cb = ttk.Combobox(right, textvariable=category_var, state="readonly", width=24)
+    category_cb.grid(row=14, column=0, sticky="ew", padx=10, ipady=2)
+    
+    # Kategori listesini yükle
+    def load_categories():
+        try:
+            from repositories import category_repository
+            cats = category_repository.list_all(cursor)
+            cat_names = ["-"] + [c[1] for c in cats]
+            category_cb['values'] = cat_names
+            if not category_var.get() or category_var.get() not in cat_names:
+                category_var.set("-")
+        except Exception:
+            category_cb['values'] = ["-"]
+            category_var.set("-")
+    
+    load_categories()
+
     right.grid_columnconfigure(0, weight=1)
 
     # Seçilen ürün ID'si (0 = seçili yok)
@@ -76,12 +104,14 @@ def mount_products(parent, conn, cursor, t,
     def load(filter_text: str = ""):
         for r in tree.get_children():
             tree.delete(r)
-        for pid, name, barcode, sale_price, stock, buy_price in product_svc.list_products(cursor, filter_text):
-            tree.insert("", "end", values=(pid, name, barcode, f"{float(sale_price):.2f}", int(stock), f"{float(buy_price):.2f}"))
+        for pid, name, barcode, sale_price, stock, buy_price, unit, category in product_svc.list_products(cursor, filter_text):
+            stock_disp = f"{int(stock)}" if str(unit).lower()=="adet" else f"{float(stock):.3f}"
+            tree.insert("", "end", values=(pid, name, barcode, f"{float(sale_price):.2f}", stock_disp, unit, f"{float(buy_price):.2f}", category))
 
     def clear_form():
         selected_id["value"] = 0
-        name_var.set(""); barcode_var.set(""); price_var.set(""); buy_price_var.set(""); stock_var.set("")
+        name_var.set(""); barcode_var.set(""); price_var.set(""); buy_price_var.set(""); stock_var.set(""); unit_var.set('adet')
+        category_var.set("-")
 
     def validate_form(require_complete: bool = True):
         name = name_var.get().strip()
@@ -98,19 +128,41 @@ def mount_products(parent, conn, cursor, t,
         except Exception:
             buy_price = None
         try:
-            stock = int(stock_var.get()) if stock_var.get().strip() else (0 if not require_complete else None)
+            stock = float(stock_var.get().replace(',', '.')) if stock_var.get().strip() else (0.0 if not require_complete else None)
         except Exception:
             stock = None
         if sale_price is None or buy_price is None or stock is None:
             messagebox.showwarning(t('warning'), t('enter_valid'))
             return None
-        return name, barcode, sale_price, stock, buy_price
+        # Birimi normalize et (tr/en farkı için)
+        u = unit_var.get().strip().lower()
+        if u in ('adet', 'piece', 'qty'):
+            u = 'adet'
+        elif u in ('kg', 'kilogram'):
+            u = 'kg'
+        else:
+            u = 'adet'
+        # Kategori ID'sini bul
+        cat_id = None
+        cat_name = category_var.get().strip()
+        if cat_name and cat_name != "-":
+            try:
+                from repositories import category_repository
+                cat = category_repository.get_by_name(cursor, cat_name)
+                if cat:
+                    cat_id = cat[0]
+            except Exception:
+                pass
+        return name, barcode, sale_price, stock, buy_price, u, cat_id
 
     def populate_from_selection(_evt=None):
         sel = tree.selection()
         if not sel:
             clear_form(); return
-        pid, name_cur, barcode_cur, sale_price_cur, stock_cur, buy_price_cur = tree.item(sel[0])["values"]
+        values = tree.item(sel[0])["values"]
+        if len(values) < 8:
+            clear_form(); return
+        pid, name_cur, barcode_cur, sale_price_cur, stock_cur, unit_cur, buy_price_cur, category_cur = values
         try:
             pid_int = int(pid)
         except Exception:
@@ -121,6 +173,10 @@ def mount_products(parent, conn, cursor, t,
         price_var.set(str(sale_price_cur))
         buy_price_var.set(str(buy_price_cur))
         stock_var.set(str(stock_cur))
+        unit_var.set(str(unit_cur).lower() if str(unit_cur).lower() in ('adet','kg') else 'adet')
+        
+        # Kategoriyi yükle
+        category_var.set(str(category_cur) if category_cur else "-")
 
     tree.bind('<<TreeviewSelect>>', populate_from_selection)
 
@@ -128,10 +184,11 @@ def mount_products(parent, conn, cursor, t,
         res = validate_form(require_complete=True)
         if not res:
             return
-        name, barcode, sale_price, stock, buy_price = res
+        name, barcode, sale_price, stock, buy_price, u, cat_id = res
         try:
-            product_svc.add_product(conn, cursor, name, barcode, sale_price, stock, buy_price)
+            product_svc.add_product(conn, cursor, name, barcode, sale_price, stock, buy_price, unit=u, category_id=cat_id)
             load(search_var.get()); clear_form()
+            load_categories()  # Yenile
         except sqlite3.IntegrityError:
             messagebox.showerror(t('error'), t('duplicate_error'))
         except ValueError as ve:
@@ -143,10 +200,11 @@ def mount_products(parent, conn, cursor, t,
         res = validate_form(require_complete=True)
         if not res:
             return
-        name, barcode, sale_price, stock, buy_price = res
+        name, barcode, sale_price, stock, buy_price, u, cat_id = res
         try:
-            product_svc.update_product(conn, cursor, selected_id["value"], name, barcode, sale_price, stock, buy_price)
+            product_svc.update_product(conn, cursor, selected_id["value"], name, barcode, sale_price, stock, buy_price, unit=u, category_id=cat_id)
             load(search_var.get())
+            load_categories()  # Yenile
         except sqlite3.IntegrityError:
             messagebox.showerror(t('error'), t('duplicate_error'))
         except ValueError as ve:

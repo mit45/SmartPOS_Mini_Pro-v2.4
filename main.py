@@ -25,6 +25,7 @@ APP_VERSION = "v2.4"
 # Dil Sistemi (Yeni)
 # ==========================
 CURRENT_LANGUAGE = "tr"
+CURRENT_USER = ""
 
 def t(key: str) -> str:
     """Çeviri fonksiyonu - Translation function"""
@@ -169,28 +170,403 @@ def mount_placeholder(parent, icon, title_text, body_text):
 
 # Generic placeholder pages for new submenus
 def mount_barkod(parent):
-    mount_placeholder(parent, "🏷️", t('barcode_mgmt'), t('coming_soon'))
+    for w in parent.winfo_children():
+        w.destroy()
+    # Header
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12, 8))
+    ttk.Label(header, text="🏷️ " + t('barcode_mgmt'), style="Header.TLabel").pack(side="left", padx=8)
+
+    # Body
+    body = ttk.Frame(parent, style="Card.TFrame"); body.pack(fill="both", expand=True, padx=12, pady=8)
+    body.grid_columnconfigure(1, weight=1)
+
+    from services import product_service as ps
+
+    ttk.Label(body, text=t('product')+":", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=8, pady=8, sticky="e")
+    products = ps.list_products(cursor)
+    product_names = [p[1] for p in products]
+    cb = ttk.Combobox(body, values=product_names, width=40, state="readonly", font=("Segoe UI", 10))
+    cb.grid(row=0, column=1, padx=8, pady=8, sticky="ew")
+
+    ttk.Label(body, text=t('current_barcode'), font=("Segoe UI", 10)).grid(row=1, column=0, padx=8, pady=6, sticky="e")
+    lbl_current = ttk.Label(body, text="-", font=("Segoe UI", 10, "bold"))
+    lbl_current.grid(row=1, column=1, padx=8, pady=6, sticky="w")
+
+    ttk.Label(body, text=t('new_barcode'), font=("Segoe UI", 10, "bold")).grid(row=2, column=0, padx=8, pady=6, sticky="e")
+    e_new = ttk.Entry(body, width=30, font=("Segoe UI", 10)); e_new.grid(row=2, column=1, padx=8, pady=6, sticky="w")
+
+    def refresh():
+        name = cb.get()
+        if not name:
+            lbl_current.config(text="-"); return
+        rows = ps.list_products(cursor, name)
+        # find exact match
+        row = next((r for r in rows if r[1]==name), None)
+        if row:
+            _, _name, barcode, _sale, _stock, _buy, _unit, _cat = row
+            lbl_current.config(text=str(barcode or "-"))
+            e_new.delete(0, tk.END)
+            e_new.insert(0, str(barcode or ""))
+
+    cb.bind("<<ComboboxSelected>>", lambda *_: refresh())
+
+    btns = ttk.Frame(body, style="Card.TFrame"); btns.grid(row=3, column=0, columnspan=2, sticky="w", padx=8, pady=(10,4))
+    def save_barcode():
+        name = cb.get().strip()
+        if not name:
+            return messagebox.showwarning(t('warning'), t('select_item'))
+        # find product entry
+        rows = ps.list_products(cursor, name)
+        row = next((r for r in rows if r[1]==name), None)
+        if not row:
+            return messagebox.showerror(t('error'), t('product_not_found'))
+        pid, _name, _barcode, sale_price, stock, buy_price, unit, _cat = row
+        try:
+            ps.update_product(conn, cursor, pid, _name, e_new.get().strip(), float(sale_price), float(stock), float(buy_price), unit=unit)
+            messagebox.showinfo(t('success'), t('updated'))
+            refresh()
+        except Exception as e:
+            messagebox.showerror(t('error'), str(e))
+
+    tk.Button(btns, text="💾 "+t('save'), command=save_barcode,
+              bg="#10b981", fg="white", font=("Segoe UI", 9, "bold"),
+              activebackground="#059669", relief="flat", padx=14, pady=8, borderwidth=0).pack(side="left", padx=4)
+
+    if product_names:
+        cb.set(product_names[0]); refresh()
 
 def mount_kategori(parent):
-    mount_placeholder(parent, "🗂️", t('category_mgmt'), t('coming_soon'))
+    """Kategori Yönetimi"""
+    for w in parent.winfo_children():
+        w.destroy()
+
+    # Header
+    header = ttk.Frame(parent, style="Card.TFrame")
+    header.pack(fill="x", padx=12, pady=(12, 8))
+    ttk.Label(header, text="🗂️ " + t('category_mgmt'), style="Header.TLabel",
+              font=("Segoe UI", 16, "bold")).pack(side="left", padx=8)
+
+    # Body
+    body = ttk.Frame(parent, style="Card.TFrame")
+    body.pack(fill="both", expand=True, padx=12, pady=8)
+
+    # Modern table
+    cols = (t('id'), t('category_name'), t('category_color'), t('product_count'))
+    tree = ttk.Treeview(body, columns=cols, show="headings", height=14)
+    for c in cols:
+        tree.heading(c, text=c)
+    tree.column(t('id'), width=60, anchor="center")
+    tree.column(t('category_name'), width=300, anchor="w")
+    tree.column(t('category_color'), width=150, anchor="center")
+    tree.column(t('product_count'), width=120, anchor="center")
+    tree.pack(fill="both", expand=True, padx=0, pady=0)
+
+    def load_categories():
+        for item in tree.get_children():
+            tree.delete(item)
+        from repositories import category_repository
+        categories = category_repository.list_all(cursor)
+        if not categories:
+            # Boş mesajı
+            tree.insert("", "end", values=("", t('no_categories'), "", ""))
+        for cid, cname, color in categories:
+            cnt = category_repository.count_products(cursor, cid)
+            tree.insert("", "end", values=(cid, cname, color or "-", cnt))
+
+    # Action buttons
+    btn_frame = ttk.Frame(parent, style="Card.TFrame")
+    btn_frame.pack(fill="x", padx=12, pady=(0, 12))
+
+    def add_category():
+        dialog = tk.Toplevel(parent)
+        dialog.title(t('add_category'))
+        set_theme(dialog)
+        center_window(dialog, 400, 200)
+
+        tk.Label(dialog, text=t('category_name') + ":", bg=CARD_COLOR, fg="white").pack(pady=(16,4), padx=16, anchor="w")
+        name_entry = ttk.Entry(dialog, width=40)
+        name_entry.pack(pady=4, padx=16, fill="x")
+
+        tk.Label(dialog, text=t('category_color') + " (hex):", bg=CARD_COLOR, fg="white").pack(pady=(8,4), padx=16, anchor="w")
+        color_entry = ttk.Entry(dialog, width=40)
+        color_entry.pack(pady=4, padx=16, fill="x")
+        color_entry.insert(0, "#00b0ff")
+
+        def save():
+            cname = name_entry.get().strip()
+            if not cname:
+                messagebox.showwarning(t('warning'), t('enter_valid'))
+                return
+            from repositories import category_repository
+            try:
+                category_repository.insert(conn, cursor, cname, color_entry.get().strip())
+                messagebox.showinfo(t('success'), t('done'))
+                load_categories()
+                dialog.destroy()
+            except Exception as e:
+                messagebox.showerror(t('error'), str(e))
+
+        tk.Button(dialog, text="✅ " + t('save'), command=save,
+                  bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
+                  relief="flat", padx=20, pady=10, cursor="hand2", borderwidth=0).pack(pady=16)
+
+    def edit_category():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning(t('warning'), t('select_record'))
+            return
+        vals = tree.item(sel[0])['values']
+        if not vals or not vals[0]:
+            return
+        cid = int(vals[0])
+        cname = str(vals[1])
+        color = str(vals[2]) if vals[2] != "-" else ""
+
+        dialog = tk.Toplevel(parent)
+        dialog.title(t('edit_category'))
+        set_theme(dialog)
+        center_window(dialog, 400, 200)
+
+        tk.Label(dialog, text=t('category_name') + ":", bg=CARD_COLOR, fg="white").pack(pady=(16,4), padx=16, anchor="w")
+        name_entry = ttk.Entry(dialog, width=40)
+        name_entry.pack(pady=4, padx=16, fill="x")
+        name_entry.insert(0, cname)
+
+        tk.Label(dialog, text=t('category_color') + " (hex):", bg=CARD_COLOR, fg="white").pack(pady=(8,4), padx=16, anchor="w")
+        color_entry = ttk.Entry(dialog, width=40)
+        color_entry.pack(pady=4, padx=16, fill="x")
+        color_entry.insert(0, color)
+
+        def save():
+            new_name = name_entry.get().strip()
+            if not new_name:
+                messagebox.showwarning(t('warning'), t('enter_valid'))
+                return
+            from repositories import category_repository
+            try:
+                category_repository.update(conn, cursor, cid, new_name, color_entry.get().strip())
+                messagebox.showinfo(t('success'), t('done'))
+                load_categories()
+                dialog.destroy()
+            except Exception as e:
+                messagebox.showerror(t('error'), str(e))
+
+        tk.Button(dialog, text="✅ " + t('save'), command=save,
+                  bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
+                  relief="flat", padx=20, pady=10, cursor="hand2", borderwidth=0).pack(pady=16)
+
+    def delete_category():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning(t('warning'), t('select_record'))
+            return
+        vals = tree.item(sel[0])['values']
+        if not vals or not vals[0]:
+            return
+        cid = int(vals[0])
+        cname = str(vals[1])
+        cnt = int(vals[3]) if vals[3] else 0
+        if cnt > 0:
+            if not messagebox.askyesno(t('warning'), f"{cname} kategorisinde {cnt} adet ürün var. Silmek istediğinize emin misiniz?"):
+                return
+        else:
+            if not messagebox.askyesno(t('delete_category'), f"{cname} kategorisini silmek istediğinize emin misiniz?"):
+                return
+        from repositories import category_repository
+        try:
+            category_repository.delete(conn, cursor, cid)
+            messagebox.showinfo(t('success'), t('done'))
+            load_categories()
+        except Exception as e:
+            messagebox.showerror(t('error'), str(e))
+
+    tk.Button(btn_frame, text="➕ " + t('add'), command=add_category,
+              bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
+              relief="flat", padx=16, pady=10, cursor="hand2", borderwidth=0).pack(side="left", padx=4)
+    tk.Button(btn_frame, text="✏️ " + t('edit'), command=edit_category,
+              bg="#f59e0b", fg="white", font=("Segoe UI", 10, "bold"),
+              relief="flat", padx=16, pady=10, cursor="hand2", borderwidth=0).pack(side="left", padx=4)
+    tk.Button(btn_frame, text="🗑 " + t('delete'), command=delete_category,
+              bg="#ef4444", fg="white", font=("Segoe UI", 10, "bold"),
+              relief="flat", padx=16, pady=10, cursor="hand2", borderwidth=0).pack(side="left", padx=4)
+
+    load_categories()
+
 
 def mount_stok_giris(parent):
-    mount_placeholder(parent, "⬆️", t('stock_in'), t('coming_soon'))
+    _mount_stok_islem(parent, mode="in")
 
 def mount_stok_cikis(parent):
-    mount_placeholder(parent, "⬇️", t('stock_out'), t('coming_soon'))
+    _mount_stok_islem(parent, mode="out")
 
 def mount_envanter_sayim(parent):
-    mount_placeholder(parent, "📦", t('inventory_count'), t('coming_soon'))
+    _mount_stok_islem(parent, mode="count")
+
+def _mount_stok_islem(parent, mode: str = "in"):
+    for w in parent.winfo_children():
+        w.destroy()
+    title = t('stock_in') if mode=="in" else (t('stock_out') if mode=="out" else t('inventory_count'))
+    icon = "⬆️" if mode=="in" else ("⬇️" if mode=="out" else "📦")
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12, 8))
+    ttk.Label(header, text=f"{icon} {title}", style="Header.TLabel").pack(side="left", padx=8)
+
+    body = ttk.Frame(parent, style="Card.TFrame"); body.pack(fill="x", padx=12, pady=8)
+    body.grid_columnconfigure(1, weight=1)
+
+    from services import product_service as ps
+    products = ps.list_products(cursor)
+    names = [p[1] for p in products]
+
+    ttk.Label(body, text=t('product')+":", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=8, pady=8, sticky="e")
+    cb = ttk.Combobox(body, values=names, width=40, state="readonly", font=("Segoe UI", 10))
+    cb.grid(row=0, column=1, padx=8, pady=8, sticky="ew")
+
+    ttk.Label(body, text=t('stock')+":", font=("Segoe UI", 10)).grid(row=1, column=0, padx=8, pady=6, sticky="e")
+    lbl_stock = ttk.Label(body, text="-", font=("Segoe UI", 10, "bold")); lbl_stock.grid(row=1, column=1, padx=8, pady=6, sticky="w")
+    ttk.Label(body, text=t('unit')+":", font=("Segoe UI", 10)).grid(row=1, column=2, padx=8, pady=6, sticky="e")
+    lbl_unit = ttk.Label(body, text="-", font=("Segoe UI", 10)); lbl_unit.grid(row=1, column=3, padx=8, pady=6, sticky="w")
+
+    qty_label = t('quantity') if mode!="count" else t('stock')
+    ttk.Label(body, text=qty_label+":", font=("Segoe UI", 10, "bold")).grid(row=2, column=0, padx=8, pady=6, sticky="e")
+    e_qty = ttk.Entry(body, width=12, font=("Segoe UI", 10)); e_qty.grid(row=2, column=1, padx=8, pady=6, sticky="w")
+
+    def refresh():
+        name = cb.get()
+        if not name:
+            lbl_stock.config(text="-"); lbl_unit.config(text="-"); return
+        info = ps.get_price_stock_by_name(cursor, name)
+        if info:
+            _price, stock, unit = info
+            lbl_unit.config(text=str(unit))
+            if str(unit).lower()=="kg":
+                lbl_stock.config(text=f"{float(stock):.3f}")
+            else:
+                lbl_stock.config(text=str(int(float(stock))))
+
+    cb.bind("<<ComboboxSelected>>", lambda *_: refresh())
+
+    def apply_change():
+        name = cb.get().strip()
+        if not name:
+            return messagebox.showwarning(t('warning'), t('select_item'))
+        qty = parse_float_safe(e_qty.get(), None)
+        if qty is None or qty < 0:
+            return messagebox.showwarning(t('warning'), t('enter_valid'))
+        info2 = ps.get_price_stock_by_name(cursor, name)
+        if not info2:
+            return messagebox.showerror(t('error'), t('product_not_found'))
+        price, stock, unit = info2
+        if mode=="in":
+            ps.increment_stock(conn, cursor, name, float(qty))
+        elif mode=="out":
+            if float(qty) > float(stock):
+                return messagebox.showwarning(t('warning'), t('insufficient_stock').format(stock=stock))
+            ps.decrement_stock(conn, cursor, name, float(qty))
+        else:  # count
+            # set stock to target by adjusting delta
+            target = float(qty)
+            delta = target - float(stock)
+            if abs(delta) > 1e-9:
+                if delta > 0:
+                    ps.increment_stock(conn, cursor, name, delta)
+                else:
+                    ps.decrement_stock(conn, cursor, name, -delta)
+        refresh(); messagebox.showinfo(t('success'), t('done'))
+
+    btn_text = t('save') if mode=="count" else t('apply') if t('apply')!= 'apply' else t('save')
+    tk.Button(body, text="✅ "+btn_text, command=apply_change,
+              bg="#00b0ff", fg="white", font=("Segoe UI", 10, "bold"),
+              activebackground="#0ea5e9", relief="flat", padx=14, pady=8, borderwidth=0).grid(row=3, column=1, padx=8, pady=10, sticky="w")
+
+    if names:
+        cb.set(names[0]); refresh()
 
 def mount_tahsilat(parent):
-    mount_placeholder(parent, "💰", t('collection_entry'), t('coming_soon'))
+    _mount_cari_islem(parent, mode="tahsilat")
 
 def mount_odeme(parent):
-    mount_placeholder(parent, "💸", t('payment_entry'), t('coming_soon'))
+    _mount_cari_islem(parent, mode="odeme")
 
 def mount_cari_hareketler(parent):
-    mount_placeholder(parent, "🔁", t('transactions'), t('coming_soon'))
+    _mount_cari_islem(parent, mode="hareket")
+
+def _mount_cari_islem(parent, mode: str):
+    for w in parent.winfo_children():
+        w.destroy()
+    from services import cari_service as cs
+    title = t('collection_entry') if mode=="tahsilat" else (t('payment_entry') if mode=="odeme" else t('transactions'))
+    icon = "💰" if mode=="tahsilat" else ("💸" if mode=="odeme" else "🔁")
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12, 8))
+    ttk.Label(header, text=f"{icon} {title}", style="Header.TLabel").pack(side="left", padx=8)
+
+    body = ttk.Frame(parent, style="Card.TFrame"); body.pack(fill="both", expand=True, padx=12, pady=8)
+
+    # Cari seçimi
+    ttk.Label(body, text=t('cari_name'), font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=8, pady=8, sticky="e")
+    cariler = cs.list_all(cursor)
+    cari_names = [c[1] for c in cariler]
+    cb = ttk.Combobox(body, values=cari_names, width=36, state="readonly", font=("Segoe UI", 10))
+    cb.grid(row=0, column=1, padx=8, pady=8, sticky="w")
+
+    if mode in ("tahsilat","odeme"):
+        ttk.Label(body, text=t('tutar'), font=("Segoe UI", 10, "bold")).grid(row=1, column=0, padx=8, pady=6, sticky="e")
+        e_amount = ttk.Entry(body, width=14, font=("Segoe UI", 10)); e_amount.grid(row=1, column=1, padx=8, pady=6, sticky="w")
+        ttk.Label(body, text=t('aciklama'), font=("Segoe UI", 10)).grid(row=2, column=0, padx=8, pady=6, sticky="e")
+        e_desc = ttk.Entry(body, width=28, font=("Segoe UI", 10)); e_desc.grid(row=2, column=1, padx=8, pady=6, sticky="w")
+
+        def apply_tx():
+            name = cb.get().strip()
+            if not name:
+                return messagebox.showwarning(t('warning'), t('select_item'))
+            row = next((c for c in cariler if c[1]==name), None)
+            if not row:
+                return messagebox.showerror(t('error'), t('product_not_found'))
+            cari_id = row[0]
+            amt = parse_float_safe(e_amount.get(), None)
+            if amt is None or amt <= 0:
+                return messagebox.showwarning(t('warning'), t('enter_valid'))
+            desc = e_desc.get().strip() or (t('collection_entry') if mode=="tahsilat" else t('payment_entry'))
+            try:
+                if mode=="tahsilat":
+                    cs.add_tahsilat(conn, cursor, cari_id, amt, desc)
+                else:
+                    cs.add_odeme(conn, cursor, cari_id, amt, desc)
+                messagebox.showinfo(t('success'), t('done'))
+                load_moves()
+            except Exception as e:
+                messagebox.showerror(t('error'), str(e))
+
+        tk.Button(body, text="✅ "+t('save'), command=apply_tx,
+                  bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
+                  activebackground="#059669", relief="flat", padx=14, pady=8, borderwidth=0).grid(row=3, column=1, padx=8, pady=8, sticky="w")
+
+    # Hareket listesi
+    frame = ttk.Frame(body, style="Card.TFrame"); frame.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=8, pady=12)
+    body.grid_rowconfigure(4, weight=1)
+    body.grid_columnconfigure(1, weight=1)
+    cols = (t('date'), t('islem_type'), t('tutar'), t('aciklama'))
+    tree = ttk.Treeview(frame, columns=cols, show="headings", height=10)
+    for c in cols:
+        tree.heading(c, text=c)
+        anchor = "e" if c in (t('tutar'),) else ("w" if c in (t('aciklama'),) else "center")
+        tree.column(c, anchor=anchor, width=140)
+    tree.pack(fill="both", expand=True)
+
+    def load_moves():
+        for r in tree.get_children():
+            tree.delete(r)
+        name = cb.get().strip()
+        if not name:
+            return
+        row = next((c for c in cariler if c[1]==name), None)
+        if not row:
+            return
+        for mid, typ, tutar, acik, created in cs.list_hareketler(cursor, row[0]):
+            tree.insert("", "end", values=(str(created), str(typ), f"{float(tutar):.2f}", str(acik or "")))
+
+    cb.bind("<<ComboboxSelected>>", lambda *_: load_moves())
+    if cari_names:
+        cb.set(cari_names[0]); load_moves()
 
 def mount_hizmet_listesi(parent):
     mount_placeholder(parent, "🛠️", t('service_list'), t('coming_soon'))
@@ -258,8 +634,8 @@ def mount_users(parent):
         tree.column(c, anchor="center", width=200)
     
     # Zebrastripe
-    tree.tag_configure('oddrow', background='#1f1f25')
-    tree.tag_configure('evenrow', background='#252530')
+        tree.tag_configure('oddrow', background='#1f1f25')
+        tree.tag_configure('evenrow', background='#252530')
     
     original_insert = tree.insert
     def insert_with_tags(*args, **kwargs):
@@ -558,9 +934,12 @@ def mount_reports(parent):
         t_qty=0; t_sum=0.0
         for fis_id, ts, pname, qty, price, total in rows:
             ts_disp = (ts or "").replace("T"," ")
-            tree.insert("", "end", values=(fis_id, ts_disp, pname, qty, f"{float(price):.2f}", f"{float(total):.2f}"))
-            t_qty += int(qty); t_sum += float(total)
-        lbl_sum.config(text=f"{t('quantity')}: {t_qty} | {t('total')}: {t_sum:.2f} ₺")
+            # miktarı virgüllü göstermek için
+            qty_disp = f"{float(qty):.3f}" if abs(float(qty) - round(float(qty))) > 1e-6 else str(int(round(float(qty))))
+            tree.insert("", "end", values=(fis_id, ts_disp, pname, qty_disp, f"{float(price):.2f}", f"{float(total):.2f}"))
+            t_qty += float(qty); t_sum += float(total)
+        qty_total_disp = f"{t_qty:.3f}" if abs(t_qty - round(t_qty)) > 1e-6 else str(int(round(t_qty)))
+        lbl_sum.config(text=f"{t('quantity')}: {qty_total_disp} | {t('total')}: {t_sum:.2f} ₺")
 
     def export_csv():
         frm, to = sv_from.get().strip(), sv_to.get().strip()
@@ -631,16 +1010,18 @@ def mount_reports(parent):
             
             # Tablo verileri
             data = [[t('receipt_no'), t('date'), t('product'), t('quantity'), t('price'), t('total')]]
-            t_qty = 0
+            t_qty = 0.0
             t_sum = 0.0
             for fis_id, ts, pname, qty, price, total in rows:
                 ts_disp = (ts or "").replace("T", " ")
-                data.append([str(fis_id), ts_disp, str(pname), str(qty), f"{float(price):.2f}", f"{float(total):.2f}"])
-                t_qty += int(qty)
+                qty_disp = f"{float(qty):.3f}" if abs(float(qty) - round(float(qty))) > 1e-6 else str(int(round(float(qty))))
+                data.append([str(fis_id), ts_disp, str(pname), qty_disp, f"{float(price):.2f}", f"{float(total):.2f}"])
+                t_qty += float(qty)
                 t_sum += float(total)
             
             # Toplam satırı
-            data.append(['', '', t('total'), str(t_qty), '', f"{t_sum:.2f} ₺"])
+            qty_total_disp = f"{t_qty:.3f}" if abs(t_qty - round(t_qty)) > 1e-6 else str(int(round(t_qty)))
+            data.append(['', '', t('total'), qty_total_disp, '', f"{t_sum:.2f} ₺"])
             
             product_table = Table(data, colWidths=[45*mm, 40*mm, 50*mm, 20*mm, 25*mm, 30*mm])
             product_table.setStyle(TableStyle([
@@ -701,7 +1082,7 @@ def mount_reports(parent):
             for pname, qty, unit_net, line_gross in rows:
                 q = float(qty) if qty else 1.0
                 unit_gross = float(line_gross) / q if q else float(unit_net)
-                sales_list.append((str(pname), int(qty), float(unit_gross), float(line_gross)))
+                sales_list.append((str(pname), float(q), float(unit_gross), float(line_gross)))
 
             # Etkin KDV oranını yaklaşık hesapla (bilgi amaçlı)
             try:
@@ -970,374 +1351,1501 @@ def mount_cariler(parent):
     load()
 
 def mount_sales(parent):
+    """Modern POS Arayüzü - Resimdeki tasarıma göre"""
     for w in parent.winfo_children():
         w.destroy()
-
-    # Başlık
-    ttk.Label(parent, text="🛒 " + t('sales_screen'), style="Header.TLabel", font=("Segoe UI", 14, "bold")).pack(pady=(6,2))
-
-    # Üst Bilgi Bloğu
-    top = ttk.Frame(parent, style="Card.TFrame"); top.pack(fill="x", padx=12, pady=6)
-    # Combobox yüksekliği için büyük stil
-    try:
-        style = ttk.Style(top)
-        style.configure('Large.TCombobox', padding=(8, 8))
-        style.configure('LargeValue.TLabel', padding=(4, 6))
-    except Exception:
-        pass
-    top.grid_columnconfigure(1, weight=1)
-    top.grid_columnconfigure(7, weight=0)
-
-    from services import cari_service
-
-    # Cari seçimi
-    ttk.Label(top, text=t('customer_name'), font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=6, pady=6, sticky="w")
-    def get_cari_names():
-        cariler = cari_service.list_all(cursor)
-        return [c[1] for c in cariler]
-    # Müşteri seçimi ve ekleme butonunu aynı kutuda toplayalım (ikon yakına gelsin)
-    cari_box = tk.Frame(top, bg=BG_COLOR)
-    cari_box.grid(row=0, column=1, padx=(6,2), pady=6, sticky="ew")
-    cari_box.grid_columnconfigure(0, weight=1)
-    customer_cb = ttk.Combobox(cari_box, values=get_cari_names(), width=36, font=("Segoe UI", 11), style='Large.TCombobox', state="readonly")
-    customer_cb.grid(row=0, column=0, padx=(0,4), pady=0, sticky="ew")
-
-    def add_new_cari_from_sales():
-        from tkinter import simpledialog
-        name = simpledialog.askstring(t('add'), t('cari_name'))
-        if not name or not name.strip():
-            return
-        phone = simpledialog.askstring(t('phone'), t('phone'), initialvalue="")
-        try:
-            cari_service.add_cari(conn, cursor, name.strip(), phone or "", "", 0, 'alacakli')
-            messagebox.showinfo(t('success'), t('cari_added_name').format(name=name))
-            customer_cb.config(values=get_cari_names())
-            customer_cb.set(name.strip())
-        except Exception as e:
-            messagebox.showerror(t('error'), str(e))
-    add_cari_btn = tk.Button(cari_box, text="➕", command=add_new_cari_from_sales,
-                             bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
-                             activebackground="#059669", activeforeground="white",
-                             relief="flat", padx=8, pady=4, cursor="hand2", borderwidth=0)
-    add_cari_btn.grid(row=0, column=1, padx=(2, 0), pady=0, sticky="e")
-
-    def add_cari_hover_in(e): add_cari_btn.config(bg="#059669")
-    def add_cari_hover_out(e): add_cari_btn.config(bg="#10b981")
-    add_cari_btn.bind("<Enter>", add_cari_hover_in)
-    add_cari_btn.bind("<Leave>", add_cari_hover_out)
-
-    # KDV ve KDV Dahil
-    ttk.Label(top, text=t('vat'), font=("Segoe UI", 10, "bold")).grid(row=0, column=3, padx=6, pady=6, sticky="e")
-    vat_cb = ttk.Combobox(top, values=["%8","%18", t('special_vat')], state="readonly", width=8, font=("Segoe UI", 10))
-    vat_cb.set("%18")
-    vat_cb.grid(row=0, column=4, padx=(6,0), pady=6)
-    vat_included_var = tk.BooleanVar(value=False)
-    vat_included_cb = tk.Checkbutton(top, text=t('vat_included'), variable=vat_included_var,
-                                     font=("Segoe UI", 9), bg=BG_COLOR, fg=TEXT_GRAY,
-                                     activebackground=BG_COLOR, activeforeground="#00b0ff",
-                                     selectcolor="#1a1a20", cursor="hand2")
-    vat_included_cb.grid(row=0, column=5, padx=(6,6), pady=6, sticky="w")
-
-    # Ödeme yöntemi
-    ttk.Label(top, text=t('payment_method'), font=("Segoe UI", 10, "bold")).grid(row=1, column=0, padx=6, pady=6, sticky="w")
-    payment_var = tk.StringVar(value='cash')
-    pm_box = tk.Frame(top, bg=BG_COLOR); pm_box.grid(row=1, column=1, columnspan=2, padx=6, pady=6, sticky="w")
-    def set_hover(btn, base, hover):
-        try:
-            btn.unbind("<Enter>"); btn.unbind("<Leave>")
-        except Exception:
-            pass
-        def on_enter(_): btn.config(bg=hover)
-        def on_leave(_): btn.config(bg=base)
-        btn.bind("<Enter>", on_enter); btn.bind("<Leave>", on_leave)
-
-    def create_payment_button(parent, text, value):
-        def toggle():
-            payment_var.set(value)
-            update_payment_buttons()
-        b = tk.Button(parent, text=text, command=toggle, font=("Segoe UI", 10, "bold"), relief="flat",
-                      padx=18, pady=10, cursor="hand2", borderwidth=0, width=14)
-        b.pack(side="left", padx=4)
-        return b
-
-    cash_btn = create_payment_button(pm_box, "💵 " + t('cash'), 'cash')
-    card_btn = create_payment_button(pm_box, "💳 " + t('credit_card'), 'card')
-
-    def update_payment_buttons():
-        if payment_var.get() == 'cash':
-            cash_btn.config(bg=ACCENT, fg="white", activebackground="#0090dd")
-            card_btn.config(bg="#2a2a35", fg=TEXT_GRAY, activebackground="#3a3a45")
-            set_hover(cash_btn, ACCENT, "#0090dd")
-            set_hover(card_btn, "#2a2a35", "#3a3a45")
-        else:
-            card_btn.config(bg=ACCENT, fg="white", activebackground="#0090dd")
-            cash_btn.config(bg="#2a2a35", fg=TEXT_GRAY, activebackground="#3a3a45")
-            set_hover(card_btn, ACCENT, "#0090dd")
-            set_hover(cash_btn, "#2a2a35", "#3a3a45")
-
-    update_payment_buttons()
-
-    # İndirim
-    ttk.Label(top, text=t('discount'), font=("Segoe UI", 10, "bold")).grid(row=1, column=3, padx=6, pady=6, sticky="e")
-    discount_entry = ttk.Entry(top, width=8, font=("Segoe UI", 10)); discount_entry.insert(0, "0")
-    discount_entry.grid(row=1, column=4, padx=6, pady=6, sticky="w")
-
-    # Barkod alanı (ürün ekleme satırında, sağda aksiyonların solunda)
-    # Ürün seçimi ve aksiyonlar
-
-    # Ürün seçimi ve aksiyonlar
-    pick = ttk.Frame(parent, style="Card.TFrame"); pick.pack(fill="x", padx=12, pady=6)
-    ttk.Label(pick, text=t('product')+":", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, padx=4, pady=4, sticky="w")
-    # Ürün seçimini genişlet ve satırda esnet
-    pick.grid_columnconfigure(1, weight=1)
-    all_products = refresh_product_values_for_combo()
-    cb_product = ttk.Combobox(pick, values=all_products, state="normal", width=40, font=("Segoe UI", 11), style='Large.TCombobox')
-    cb_product.grid(row=0, column=1, padx=4, pady=4, sticky="ew")
-    ttk.Label(pick, text=t('quantity')+":", font=("Segoe UI", 9, "bold")).grid(row=0, column=2, padx=4, pady=4, sticky="e")
-    e_qty = ttk.Entry(pick, width=6, font=("Segoe UI", 10, "bold")); e_qty.insert(0, "1")
-    e_qty.grid(row=0, column=3, padx=4, pady=4, sticky="w")
-
-    # Fiyat etiketi dinamik (KDV Dahil/Hariç)
-    lbl_price_header = ttk.Label(pick, text=t('price')+":", font=("Segoe UI", 10))
-    lbl_price_header.grid(row=1, column=0, padx=4, pady=(6,6), sticky="w")
-    lbl_price = ttk.Label(pick, text="-", style="LargeValue.TLabel", font=("Segoe UI", 11, "bold")); lbl_price.grid(row=1, column=1, sticky="w", padx=4, pady=(6,6), ipady=3)
-    ttk.Label(pick, text=t('stock')+":", font=("Segoe UI", 10)).grid(row=1, column=2, padx=4, pady=(6,6), sticky="e")
-    lbl_stock = ttk.Label(pick, text="-", style="LargeValue.TLabel", font=("Segoe UI", 11, "bold")); lbl_stock.grid(row=1, column=3, sticky="w", padx=4, pady=(6,6), ipady=3)
     
-    def update_price_label_text():
-        """KDV Dahil açıksa 'Fiyat (KDV Dahil)', değilse 'Fiyat (KDV Hariç)' göster"""
-        if vat_included_var.get():
-            lbl_price_header.config(text=t('price')+" (KDV Dahil):")
-        else:
-            lbl_price_header.config(text=t('price')+" (KDV Hariç):")
-
-    # Sağ panel: üstte barkod, altında aksiyon butonları
-    pick.grid_columnconfigure(4, weight=1)
-    right_panel = tk.Frame(pick, bg=BG_COLOR); right_panel.grid(row=0, column=5, rowspan=2, padx=(6,0), pady=2, sticky="ne")
-    barcode_frame = tk.Frame(right_panel, bg=CARD_COLOR)
-    barcode_frame.pack(fill="x", padx=0, pady=(0,6))
-    tk.Label(barcode_frame, text="📷", font=("Segoe UI", 12), bg=CARD_COLOR, fg="white").pack(side="left", padx=(6,6))
-    barcode_entry = tk.Entry(barcode_frame, font=("Segoe UI", 11), bg="#ffffff", fg="#000000",
-                             insertbackground="#000000", relief="flat")
-    barcode_entry.pack(side="left", fill="x", expand=True, padx=(0,8), pady=6, ipady=4)
-    barcode_entry.insert(0, "🔍 " + t('scan_barcode'))
-
-    # Aksiyon butonları sağda, her koşulda görünür
-    actions_frame = tk.Frame(right_panel, bg=BG_COLOR)
-    actions_frame.pack(fill="x")
-    def create_action_button(parent, text, command, bg_color):
-        btn = tk.Button(parent, text=text, command=command, bg=bg_color, fg="white", font=("Segoe UI", 10, "bold"),
-                        activebackground=bg_color, activeforeground="white", relief="flat", padx=18, pady=10,
-                        cursor="hand2", borderwidth=0, width=16)
-        # Tutarlı hover renkleri
-        hover = "#0ea5e9" if bg_color == "#00b0ff" else ("#059669" if bg_color == "#10b981" else "#ef233c")
-        def on_enter(_): btn.config(bg=hover)
-        def on_leave(_): btn.config(bg=bg_color)
-        btn.bind("<Enter>", on_enter); btn.bind("<Leave>", on_leave)
-        btn.pack(side="right", padx=(0,6))
-        return btn
-
     from services import product_service as product_svc
     from services import sales_service as sales_svc
-
-    def update_info(*_):
-        pname = cb_product.get(); r = product_svc.get_price_stock_by_name(cursor, pname)
-        if r:
-            price, stock = r; lbl_price.config(text=f"{float(price):.2f} ₺"); lbl_stock.config(text=str(int(stock)))
+    from services import cari_service
+    
+    # Ana konteynır (sol menü için)
+    main_container = tk.Frame(parent, bg=BG_COLOR)
+    main_container.pack(fill="both", expand=True, padx=0, pady=0)
+    
+    # === SOL MEN��: AÇILIR KAPANIR ===
+    menu_state = {"open": False}
+    
+    # Menü butonu (hamburger)
+    menu_btn_container = tk.Frame(main_container, bg="#1a1a20", width=60, height=60)
+    menu_btn_container.place(x=0, y=0)
+    
+    menu_btn = tk.Button(menu_btn_container, text="☰", font=("Segoe UI", 24),
+                        bg="#20c997", fg="white", relief="flat", padx=8, pady=4,
+                        cursor="hand2", borderwidth=0, activebackground="#17a589")
+    menu_btn.pack(fill="both", expand=True)
+    
+    # Menü paneli (başlangıçta gizli)
+    menu_panel = tk.Frame(main_container, bg="#1a1a20", width=250)
+    
+    def toggle_menu():
+        if menu_state["open"]:
+            # Kapat
+            menu_panel.place_forget()
+            menu_state["open"] = False
+            menu_btn.config(text="☰")
         else:
-            lbl_price.config(text="-"); lbl_stock.config(text="-")
-    cb_product.bind("<<ComboboxSelected>>", update_info)
-
-    # Ürün adı yazarak filtreleme
-    # Ürün adı yazarak filtreleme (debounce ile akıcı)
-    _filter_job = {"id": None}
-    def _apply_filter():
+            # Aç
+            menu_panel.place(x=0, y=0, relheight=1.0)
+            menu_state["open"] = True
+            menu_btn.config(text="✕")
+        
+        # Hızlı ürünler yerleşimini güncelle (menü genişliği değiştiğinde)
+        # Birden fazla tetikleme ile güvenilirliği artır
         try:
-            text = (cb_product.get() or "").strip().lower()
-            matches = [p for p in all_products if text in p.lower()] if text else list(all_products)
-            cb_product.configure(values=matches)
-        finally:
-            _filter_job["id"] = None
+            if hasattr(parent, '_relayout_quick_products'):
+                parent.update_idletasks()  # Layout güncellemesini zorla
+                parent.after(10, parent._relayout_quick_products)
+                parent.after(100, parent._relayout_quick_products)
+                parent.after(200, parent._relayout_quick_products)
+        except Exception:
+            pass
+    
+    menu_btn.config(command=toggle_menu)
+    
+    # Menü içeriği
+    menu_header = tk.Frame(menu_panel, bg="#20c997", height=60)
+    menu_header.pack(fill="x")
+    tk.Label(menu_header, text="📋 İşlem Menüsü", font=("Segoe UI", 14, "bold"),
+             bg="#20c997", fg="white").pack(side="left", padx=15, pady=15)
+    
+    menu_close_btn = tk.Button(menu_header, text="✕", font=("Segoe UI", 18),
+                               bg="#20c997", fg="white", relief="flat", padx=8,
+                               cursor="hand2", borderwidth=0, command=toggle_menu)
+    menu_close_btn.pack(side="right", padx=10)
+    
+    menu_content = tk.Frame(menu_panel, bg="#1a1a20")
+    menu_content.pack(fill="both", expand=True, padx=0, pady=0)
+    
+    # Menü öğeleri
+    def create_menu_item(parent, icon, text, command):
+        btn = tk.Button(parent, text=f"{icon}  {text}", font=("Segoe UI", 11),
+                       bg="#1a1a20", fg="white", relief="flat", anchor="w",
+                       padx=20, pady=12, cursor="hand2", borderwidth=0,
+                       activebackground="#2a2a35", activeforeground="white",
+                       command=command)
+        btn.pack(fill="x", pady=1)
+        
+        def on_enter(e):
+            btn.config(bg="#2a2a35")
+        def on_leave(e):
+            btn.config(bg="#1a1a20")
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        return btn
+    
+    # Menü öğelerini ekle
+    create_menu_item(menu_content, "📦", t('product_mgmt'), lambda: [toggle_menu(), mount_products(parent)])
+    create_menu_item(menu_content, "📊", t('stock_mgmt'), lambda: [toggle_menu(), mount_stok_giris(parent)])
+    create_menu_item(menu_content, "💼", t('account_mgmt_menu'), lambda: [toggle_menu(), mount_cariler(parent)])
+    create_menu_item(menu_content, "👥", t('users'), lambda: [toggle_menu(), mount_users(parent)])
+    create_menu_item(menu_content, "🛑", t('cancel_sale'), lambda: [toggle_menu(), mount_cancel_sales(parent)])
+    create_menu_item(menu_content, "🧾", t('receipts'), lambda: [toggle_menu(), mount_receipts(parent)])
+    create_menu_item(menu_content, "📈", t('reports'), lambda: [toggle_menu(), mount_reports(parent)])
+    
+    # Ana içerik (menü kapalıyken tam ekran)
+    content_container = tk.Frame(main_container, bg=BG_COLOR)
+    content_container.place(x=0, y=0, relwidth=1.0, relheight=1.0)
+    
+    # Ana içerik (menü kapalıyken tam ekran)
+    content_container = tk.Frame(main_container, bg=BG_COLOR)
+    content_container.place(x=0, y=0, relwidth=1.0, relheight=1.0)
+    
+    # === ÜST BÖLÜM: BARKOD OKUMA VE FİYAT GÖR ===
+    top_section = tk.Frame(content_container, bg=BG_COLOR)
+    top_section.pack(fill="x", padx=12, pady=(8,4))
+    
+    # Barkod giriş alanı (sol)
+    barcode_frame = tk.Frame(top_section, bg=CARD_COLOR, relief="flat", bd=1)
+    barcode_frame.pack(side="left", fill="x", expand=True, padx=(0,8))
+    
+    tk.Label(barcode_frame, text="📷", font=("Segoe UI", 16), bg=CARD_COLOR, fg="white").pack(side="left", padx=10)
+    barcode_entry = tk.Entry(barcode_frame, font=("Segoe UI", 14), bg="#ffffff", fg="#333333",
+                             insertbackground="#000000", relief="flat", bd=0)
+    barcode_entry.pack(side="left", fill="both", expand=True, padx=0, pady=8, ipady=6)
+    barcode_entry.insert(0, "Ürün Barkodunu Okutunuz...")
+    barcode_entry.config(fg="#999999")
+    
+    # FONKSİYONLARI ÖNCE TANIMLA (butonlardan önce)
+    def show_product_list():
+        """Ürün listesini göster (ara butonuna basıldığında)"""
+        search_text = barcode_entry.get().strip()
+        if "Okutunuz" in search_text:
+            search_text = ""
+        
+        # Ürün arama penceresi
+        search_win = tk.Toplevel(parent)
+        search_win.title(t('search'))
+        set_theme(search_win)
+        center_window(search_win, 800, 600)
+        
+        ttk.Label(search_win, text="🔍 " + t('product_list'), style="Header.TLabel").pack(pady=12)
+        
+        # Arama kutusu
+        search_frame = tk.Frame(search_win, bg=CARD_COLOR)
+        search_frame.pack(fill="x", padx=12, pady=8)
+        search_entry = ttk.Entry(search_frame, font=("Segoe UI", 11), width=40)
+        search_entry.pack(side="left", padx=8, pady=8, fill="x", expand=True)
+        search_entry.insert(0, search_text)
+        
+        # Liste
+        list_frame = tk.Frame(search_win, bg=CARD_COLOR)
+        list_frame.pack(fill="both", expand=True, padx=12, pady=8)
+        
+        cols = (t('name'), t('barcode'), t('price'), t('stock'), t('unit'))
+        search_tree = ttk.Treeview(list_frame, columns=cols, show="headings", height=15)
+        for c in cols:
+            search_tree.heading(c, text=c)
+        search_tree.column(t('name'), width=300)
+        search_tree.column(t('barcode'), width=150)
+        search_tree.column(t('price'), width=100, anchor="e")
+        search_tree.column(t('stock'), width=100, anchor="e")
+        search_tree.column(t('unit'), width=80, anchor="center")
+        search_tree.pack(fill="both", expand=True)
+        
+        def load_products(filter_text=""):
+            for item in search_tree.get_children():
+                search_tree.delete(item)
+            from repositories import product_repository
+            products = product_repository.list_all(cursor)
+            for p in products:
+                pid, name, barcode, price, stock, buy_price, unit, category = p
+                if filter_text.lower() in name.lower() or filter_text in (barcode or ""):
+                    search_tree.insert("", "end", values=(name, barcode or "", f"{float(price):.2f}", 
+                                                          f"{float(stock):.2f}", unit or "adet"))
+        
+        def on_search(e=None):
+            load_products(search_entry.get().strip())
+        
+        search_entry.bind("<KeyRelease>", on_search)
+        
+        def on_select(e=None):
+            sel = search_tree.selection()
+            if sel:
+                pname = search_tree.item(sel[0])["values"][0]
+                add_product_to_cart(pname, 1)
+                search_win.destroy()
+        
+        search_tree.bind("<Double-1>", on_select)
+        load_products(search_text)
+        search_entry.focus_set()
+    
+    def show_price():
+        """Barkod ile fiyat sorgulama"""
+        barcode = barcode_entry.get().strip()
+        if "Okutunuz" in barcode or not barcode:
+            messagebox.showwarning(t('warning'), "Lütfen barkod okutun veya girin!")
+            return
+        result = product_svc.get_by_barcode(cursor, barcode)
+        if result:
+            pid, pname, price, stock, unit = result
+            messagebox.showinfo(t('price'), f"{pname}\n\n{t('price')}: {price:.2f} ₺\n{t('stock')}: {stock:.2f} {unit}")
+        else:
+            messagebox.showerror(t('error'), t('product_not_found'))
+    
+    def reprint_last():
+        """Son fişi yeniden yazdır"""
+        cursor.execute("SELECT fis_id FROM sales ORDER BY id DESC LIMIT 1")
+        r = cursor.fetchone()
+        if not r:
+            messagebox.showwarning(t('warning'), "Henüz fiş bulunamadı!")
+            return
+        fis_id = r[0]
+        cursor.execute("SELECT product_name, quantity, price, total FROM sales WHERE fis_id=?", (fis_id,))
+        sales_list = [(row[0], row[1], row[2], row[3]) for row in cursor.fetchall()]
+        
+        if not sales_list:
+            return
+        
+        print_receipt(sales_list, fis_id=fis_id, customer_name=t('customer'),
+                     kdv_rate=18.0, discount_rate=0.0, vat_included=False,
+                     language_code=CURRENT_LANGUAGE)
+    
+    # Ara butonu
+    search_btn = tk.Button(top_section, text="🔍 " + t('search'), font=("Segoe UI", 12, "bold"),
+                          bg="#17a2b8", fg="white", relief="flat", padx=20, pady=12,
+                          cursor="hand2", borderwidth=0, activebackground="#138496",
+                          command=show_product_list)
+    search_btn.pack(side="left", padx=4)
+    
+    # Fiyat Gör butonu
+    price_btn = tk.Button(top_section, text="💰 " + t('see_price'), font=("Segoe UI", 12, "bold"),
+                         bg="#28a745", fg="white", relief="flat", padx=20, pady=12,
+                         cursor="hand2", borderwidth=0, activebackground="#218838",
+                         command=show_price)
+    price_btn.pack(side="left", padx=4)
+    
+    # Yazdır butonu
+    print_btn = tk.Button(top_section, text="🖨 " + t('reprint'), font=("Segoe UI", 9),
+                         bg="#fd7e14", fg="white", relief="flat", padx=16, pady=8,
+                         cursor="hand2", borderwidth=0, activebackground="#e96d0b",
+                         command=reprint_last)
+    print_btn.pack(side="left", padx=4)
+    
+    # === ORTA BÖLÜM: 3 SÜTUN LAYOUT ===
+    middle_section = tk.Frame(content_container, bg=BG_COLOR)
+    middle_section.pack(fill="both", expand=True, padx=12, pady=4)
+    
+    # SOL PANEL: Ürün Listesi (genişlik artırıldı)
+    left_panel = tk.Frame(middle_section, bg=CARD_COLOR, width=750)
+    left_panel.pack(side="left", fill="both", expand=True, padx=(0,8), pady=0)
+    
+    # Ürün başlık ve ekle butonu
+    product_header = tk.Frame(left_panel, bg=CARD_COLOR)
+    product_header.pack(fill="x", padx=8, pady=8)
+    product_count_label = tk.Label(product_header, text=t('products') + " 🗂️ 0", font=("Segoe UI", 12, "bold"),
+             bg=CARD_COLOR, fg="white")
+    product_count_label.pack(side="left")
+    
+    tk.Button(product_header, text=t('add'), font=("Segoe UI", 9), bg="#6c757d", fg="white",
+             relief="flat", padx=12, pady=4, cursor="hand2", command=show_product_list).pack(side="right")
+    
+    # Ürün tablosu
+    product_frame = tk.Frame(left_panel, bg=CARD_COLOR)
+    product_frame.pack(fill="both", expand=True, padx=8, pady=(0,8))
+    
+    cols = (t('delete'), t('barcode'), t('product'), t('category'), t('quantity'), t('price'), t('total'))
+    product_tree = ttk.Treeview(product_frame, columns=cols, show="headings", height=12)
+    for c in cols:
+        product_tree.heading(c, text=c)
+    # Kolon genişliklerini 750px panel için optimize et (sağdaki G.(?) kolonu kaldırıldı)
+    product_tree.column(t('delete'), width=40, anchor="center", stretch=False)
+    product_tree.column(t('barcode'), width=110, anchor="w", stretch=False)
+    product_tree.column(t('product'), width=220, anchor="w", stretch=True)
+    product_tree.column(t('category'), width=110, anchor="w", stretch=False)
+    product_tree.column(t('quantity'), width=120, anchor="center", stretch=False)
+    product_tree.column(t('price'), width=120, anchor="center", stretch=False)
+    product_tree.column(t('total'), width=100, anchor="e", stretch=False)
+    
+    product_tree.tag_configure('oddrow', background='#1f1f25')
+    product_tree.tag_configure('evenrow', background='#252530')
 
-    def on_product_type(event=None):
-        # Önceki işi iptal et, 120ms erteli uygula
-        if _filter_job["id"] is not None:
+    # Miktar hücresi inline editor (Frame) referansı
+    qty_editor_frame = None
+
+    # Miktar hücresi için açık editörü kapat
+    def destroy_qty_editor():
+        nonlocal qty_editor_frame
+        if qty_editor_frame is not None:
             try:
-                parent.after_cancel(_filter_job["id"])  # type: ignore
+                if qty_editor_frame.winfo_exists():
+                    qty_editor_frame.destroy()
             except Exception:
                 pass
-        _filter_job["id"] = parent.after(120, _apply_filter)
+            qty_editor_frame = None
 
-    cb_product.bind("<KeyRelease>", on_product_type)
+    # Satır silme ve miktar düzenleme
+    def on_tree_click(event):
+        """Ürün tablosuna tıklandığında - Sil sütununa tıklanırsa sil"""
+        # Başka yere tıklandığında açık editör varsa kapat
+        destroy_qty_editor()
+        region = product_tree.identify_region(event.x, event.y)
+        if region == "cell":
+            column = product_tree.identify_column(event.x)
+            item = product_tree.identify_row(event.y)
+            if column == "#1" and item:  # Sil sütunu (#1 = ilk sütun)
+                if messagebox.askyesno("Sil", "Bu ürünü sepetten silmek istiyor musunuz?"):
+                    destroy_qty_editor()
+                    # İlgili miktar ve fiyat frame'lerini de kaldır
+                    try:
+                        frq = qty_frames.pop(item, None)
+                        if frq and frq.winfo_exists():
+                            frq.destroy()
+                        frp = price_frames.pop(item, None)
+                        if frp and frp.winfo_exists():
+                            frp.destroy()
+                    except Exception:
+                        pass
+                    product_tree.delete(item)
+                    update_totals()
+    # Miktar hücresi için inline editör
+    # Çoklu miktar ve fiyat editörleri: tüm satırlara kalıcı alanlar
+    qty_frames = {}   # item_id -> frame
+    price_frames = {} # item_id -> frame
 
-    def on_product_return(event=None):
-        text = (cb_product.get() or "").strip().lower()
-        matches = [p for p in all_products if text in p.lower()] if text else list(all_products)
-        if matches:
-            cb_product.set(matches[0])
-            update_info()
-    cb_product.bind("<Return>", on_product_return)
+    def build_qty_frame(item_id):
+        vals = list(product_tree.item(item_id, "values"))
+        if len(vals) < 7:
+            return
+        bbox = product_tree.bbox(item_id, "#5")  # miktar sütunu
+        if not bbox:
+            # görünmüyorsa varsa gizle
+            fr = qty_frames.get(item_id)
+            if fr and fr.winfo_exists():
+                fr.place_forget()
+            return
+        x, y, w, h = bbox
+        # Birim ve step
+        pname = vals[2]
+        unit = "adet"
+        step = 1.0
+        stock = 999999
+        try:
+            r = product_svc.get_price_stock_by_name(cursor, pname)
+            if r:
+                unit = str(r[2]) or "adet"
+                stock = float(r[1])
+            step = 0.1 if unit.lower().startswith("kg") else 1.0
+        except Exception:
+            pass
+        # Mevcut qty
+        try:
+            current_qty = float(str(vals[4]).replace(",", "."))
+        except Exception:
+            current_qty = 1.0
 
-    def get_current_vat_rate():
-        k = vat_cb.get()
-        if k == "%8": return 8.0
-        if k == "%18": return 18.0
-        if not hasattr(get_current_vat_rate, "_custom"):
-            try:
-                from tkinter import simpledialog
-                val = parse_float_safe(simpledialog.askstring(t('special_vat'), t('enter_vat_percent')), 0.0) or 0.0
-            except Exception:
-                val = 0.0
-            setattr(get_current_vat_rate, "_custom", float(val))
-        return float(getattr(get_current_vat_rate, "_custom", 0.0))
+        def format_qty(q):
+            return f"{q:.3f}" if step == 0.1 else f"{int(round(q))}"
 
-    # Sepet tablosu
-    mid = ttk.Frame(parent, style="Card.TFrame"); mid.pack(fill="both", expand=True, padx=12, pady=6)
-    cols = (t('seq'), t('product'), t('quantity'), t('price'), t('vat_short'), t('total'))
-    tree = ttk.Treeview(mid, columns=cols, show="headings", height=10)
-    for c in cols: tree.heading(c, text=c)
-    tree.column(t('seq'), width=60, anchor="center")
-    tree.column(t('product'), width=280)
-    tree.column(t('quantity'), width=80, anchor="center")
-    tree.column(t('price'), width=110, anchor="e")
-    tree.column(t('vat_short'), width=100, anchor="e")
-    tree.column(t('total'), width=120, anchor="e")
-    tree.tag_configure('oddrow', background='#1f1f25'); tree.tag_configure('evenrow', background='#252530')
-    orig_insert = tree.insert
-    def insert_with_tags(*args, **kwargs):
-        item = orig_insert(*args, **kwargs); idx = tree.index(item)
-        tree.item(item, tags=('evenrow',) if idx % 2 == 0 else ('oddrow',)); return item
-    tree.insert = insert_with_tags
-    tree.pack(fill="both", expand=True)
+        # Frame yarat veya kullan
+        frame = qty_frames.get(item_id)
+        if frame is None or not frame.winfo_exists():
+            frame = tk.Frame(product_tree, bg="#f5e4c8", highlightbackground="black", highlightthickness=1)
+            qty_frames[item_id] = frame
+            qty_var = tk.DoubleVar(value=current_qty)
 
-    # Alt bar: ara toplam
-    total_frame = tk.Frame(parent, bg=CARD_COLOR); total_frame.pack(side="bottom", pady=6, fill="x", padx=12)
-    total_label = tk.Label(total_frame, text=f"{t('subtotal')} 0.00 ₺", font=("Segoe UI", 14, "bold"), bg=CARD_COLOR, fg=ACCENT); total_label.pack()
+            def apply_qty(new_q, update_entry=True):
+                if new_q < 0:
+                    new_q = 0.0
+                if new_q > stock:
+                    new_q = stock
+                if step == 0.1:
+                    new_q = round(new_q, 3)
+                else:
+                    new_q = round(new_q)
+                qty_var.set(new_q)
+                if update_entry and 'qty_entry' in locals():
+                    try:
+                        qty_entry.delete(0, tk.END)
+                        qty_entry.insert(0, format_qty(new_q))
+                    except Exception:
+                        pass
+                try:
+                    price = float(str(vals[5]).replace(",", "."))
+                except Exception:
+                    price = 0.0
+                vals[4] = format_qty(new_q)
+                vals[6] = f"{price * float(new_q):.2f}"
+                product_tree.item(item_id, values=vals)
+                update_totals()
 
-    def rebuild_cart_rows():
-        rows = list(tree.get_children()); rate = get_current_vat_rate(); inc = bool(vat_included_var.get())
-        items = []
-        for r in rows:
-            vals = list(tree.item(r)["values"]) if tree.item(r) else []
-            if not vals: continue
-            if len(vals) >= 3 and (str(vals[0]).isdigit() or isinstance(vals[0], int)):
-                pname = vals[1]; qty = int(vals[2])
-            else:
-                pname = vals[0]; qty = int(vals[1]) if len(vals) > 1 else 1
-            items.append((pname, qty))
-        for r in rows: tree.delete(r)
-        seq = 1
-        for pname, qty in items:
-            pr = product_svc.get_price_stock_by_name(cursor, pname)
-            base_price = float(pr[0]) if pr else 0.0
-            if inc:
-                # Fiyat KDV dahil: neti düş, toplam satış tutarı base_price olsun
-                unit_gross = base_price
-                unit_net = unit_gross / (1.0 + rate/100.0) if rate else unit_gross
-            else:
-                # Fiyat KDV hariç: brütü ekle
-                unit_net = base_price
-                unit_gross = unit_net * (1.0 + rate/100.0)
-            unit_disp = unit_gross if inc else unit_net
-            line_vat = qty * (unit_gross - unit_net)
-            line_gross = qty * unit_gross
-            tree.insert("", "end", values=(seq, pname, qty, f"{unit_disp:.2f}", f"{line_vat:.2f}", f"{line_gross:.2f}")); seq += 1
-        update_total_label()
+            def read_from_entry():
+                try:
+                    return float(str(qty_entry.get()).replace(",", ".").strip())
+                except Exception:
+                    return qty_var.get()
 
-    def update_total_label():
-        total_sum = 0.0
-        for r in tree.get_children():
-            v = tree.item(r)["values"]
-            if len(v) >= 6:
-                total_sum += float(v[5])
-            elif len(v) >= 4:
-                total_sum += float(v[-1])
-        total_label.config(text=f"{t('subtotal')} {total_sum:.2f} ₺")
+            def inc():
+                apply_qty(read_from_entry() + step)
+            def dec():
+                apply_qty(read_from_entry() - step)
 
-    try:
-        vat_cb.bind('<<ComboboxSelected>>', lambda e: rebuild_cart_rows())
-        vat_included_cb.config(command=lambda: [rebuild_cart_rows(), update_price_label_text()])
-    except Exception:
-        pass
+            # GRID yerleşimi: butonlar sabit, orta giriş esner
+            frame.grid_propagate(False)
+            frame.columnconfigure(1, weight=1)
+            btn_minus = tk.Button(frame, text="-", font=("Segoe UI", 10, "bold"), bg="#dc3545", fg="white", bd=0, cursor="hand2", command=dec)
+            btn_plus = tk.Button(frame, text="+", font=("Segoe UI", 10, "bold"), bg="#28a745", fg="white", bd=0, cursor="hand2", command=inc)
+            qty_entry = tk.Entry(frame, justify="center", font=("Segoe UI", 10, "bold"), bg="#f5e4c8", fg="#000", relief="flat")
+            qty_entry.insert(0, format_qty(current_qty))
+            btn_minus.grid(row=0, column=0, sticky="nsw", padx=(0,0))
+            qty_entry.grid(row=0, column=1, sticky="nsew")
+            btn_plus.grid(row=0, column=2, sticky="nse", padx=(0,0))
 
-    def add_to_cart():
-        pname = cb_product.get().strip(); qty = parse_int_safe(e_qty.get(), None)
-        if not pname or qty is None or qty <= 0:
-            return messagebox.showwarning(t('warning'), t('valid_product_qty'))
-        r = product_svc.get_price_stock_by_name(cursor, pname)
-        if not r:
-            return messagebox.showerror(t('error'), t('product_not_found'))
-        unit_net, stock = float(r[0]), int(r[1])
-        if qty > stock:
-            return messagebox.showerror(t('error'), t('insufficient_stock').format(stock=stock))
-        seq = len(tree.get_children()) + 1
-        tree.insert("", "end", values=(seq, pname, qty, f"{unit_net:.2f}", f"0.00", f"0.00"))
-        rebuild_cart_rows()
+            def on_qty_keyrelease(e):
+                # metinden sayıyı al, geçerliyse satırı güncelle, giriş biçimini bozmadan
+                try:
+                    val = float(str(qty_entry.get()).replace(",", ".").strip())
+                    apply_qty(val, update_entry=False)
+                except Exception:
+                    pass
 
-    def remove_selected():
-        for s in tree.selection(): tree.delete(s)
-        rebuild_cart_rows()
+            def on_qty_commit(e=None):
+                apply_qty(read_from_entry(), update_entry=True)
 
-    # Aksiyon butonları, confirm_sale tanımından sonra oluşturulacak
-
-    # Barkod olayları
-    def barcode_focus_in(event):
-        cur = barcode_entry.get()
-        if "🔍" in cur or cur == t('scan_barcode'):
-            barcode_entry.delete(0, tk.END); barcode_entry.config(foreground="#000000")
-    def barcode_focus_out(event):
-        if not barcode_entry.get().strip():
-            barcode_entry.insert(0, "🔍 " + t('scan_barcode')); barcode_entry.config(foreground="#999999")
-    def scan_barcode(event):
-        barcode = barcode_entry.get().strip().replace("🔍", "").strip()
-        if not barcode or barcode == t('scan_barcode'): return
-        result = product_svc.get_by_barcode(cursor, barcode)
-        if not result:
-            messagebox.showwarning(t('warning'), t('barcode_not_found').format(barcode=barcode))
-            barcode_entry.delete(0, tk.END); barcode_entry.insert(0, "🔍 " + t('scan_barcode')); barcode_entry.config(foreground="#999999"); return
-        pid, pname, price, stock = result
-        qty = parse_int_safe(e_qty.get(), 1) or 1
-        if qty > int(stock):
-            messagebox.showerror(t('error'), t('insufficient_stock').format(stock=stock))
-            barcode_entry.delete(0, tk.END); barcode_entry.insert(0, "🔍 " + t('scan_barcode')); barcode_entry.config(foreground="#999999"); return
-        seq = len(tree.get_children()) + 1
-        tree.insert("", "end", values=(seq, pname, qty, f"{float(price):.2f}", f"0.00", f"0.00"))
-        rebuild_cart_rows()
-        barcode_entry.delete(0, tk.END); barcode_entry.insert(0, "🔍 " + t('scan_barcode')); barcode_entry.config(foreground="#999999"); barcode_entry.focus_set()
-    barcode_entry.bind("<FocusIn>", barcode_focus_in)
-    barcode_entry.bind("<FocusOut>", barcode_focus_out)
-    barcode_entry.bind("<Return>", scan_barcode)
-
-    # Satışı tamamla
-    def confirm_sale():
-        rows = tree.get_children()
-        if not rows: return messagebox.showwarning(t('warning'), t('cart_empty'))
-        customer_name = (customer_cb.get().strip() or t('customer'))
-        kdv_text = vat_cb.get()
-        discount_val = parse_float_safe(discount_entry.get(), 0.0) or 0.0
-        if kdv_text == "%8": vat_rate = 8.0
-        elif kdv_text == "%18": vat_rate = 18.0
+            qty_entry.bind('<KeyRelease>', on_qty_keyrelease)
+            qty_entry.bind('<FocusOut>', on_qty_commit)
+            qty_entry.bind('<Return>', lambda e: on_qty_commit())
         else:
-            vat_rate = parse_float_safe(simpledialog.askstring(t('special_vat'), t('enter_vat_percent')), 0.0) or 0.0
-        payment_method = payment_var.get() or 'cash'
-        vat_included_flag = bool(vat_included_var.get())
+            # mevcutsa etiketi güncelle
+            try:
+                children = frame.winfo_children()
+                if len(children) >= 2 and isinstance(children[1], tk.Entry):
+                    children[1].delete(0, tk.END)
+                    children[1].insert(0, format_qty(current_qty))
+            except Exception:
+                pass
+        frame.place(x=x, y=y, width=w, height=h)
 
-        fis_id = f"FIS-{datetime.now().strftime('%Y%m%d')}-{os.urandom(3).hex().upper()}"
-        sales_list = []
-        subtotal_gross = 0.0
-        for r in rows:
-            vals = tree.item(r)["values"]
-            pname = vals[1]; qty = int(vals[2]); line_gross = float(vals[5]) if len(vals) >= 6 else float(vals[-1])
-            # DB'ye birim NET fiyatı yazalım
-            pr = product_svc.get_price_stock_by_name(cursor, pname)
-            unit_net = float(pr[0]) if pr else 0.0
-            product_svc.decrement_stock(conn, cursor, pname, qty)
-            sales_svc.insert_sale_line(conn, cursor, fis_id, pname, qty, unit_net, line_gross, payment_method=payment_method)
-            sales_list.append((pname, qty, unit_net, line_gross))
-            subtotal_gross += line_gross
+    def build_price_frame(item_id):
+        vals = list(product_tree.item(item_id, "values"))
+        if len(vals) < 7:
+            return
+        bbox = product_tree.bbox(item_id, "#6")  # fiyat sütunu
+        if not bbox:
+            fr = price_frames.get(item_id)
+            if fr and fr.winfo_exists():
+                fr.place_forget()
+            return
+        x, y, w, h = bbox
+
+        # Mevcut price ve qty
+        try:
+            current_price = float(str(vals[5]).replace(",", "."))
+        except Exception:
+            current_price = 0.0
+        try:
+            current_qty = float(str(vals[4]).replace(",", "."))
+        except Exception:
+            current_qty = 1.0
+
+        step = 0.50  # fiyat adımı (TL)
+
+        def format_price(p):
+            return f"{p:.2f}"
+
+        frame = price_frames.get(item_id)
+        if frame is None or not frame.winfo_exists():
+            frame = tk.Frame(product_tree, bg="#f5e4c8", highlightbackground="black", highlightthickness=1)
+            price_frames[item_id] = frame
+            price_var = tk.DoubleVar(value=current_price)
+
+            def apply_price(new_p, update_entry=True):
+                if new_p < 0:
+                    new_p = 0.0
+                new_p = round(new_p, 2)
+                price_var.set(new_p)
+                if update_entry and 'price_entry' in locals():
+                    try:
+                        price_entry.delete(0, tk.END)
+                        price_entry.insert(0, format_price(new_p))
+                    except Exception:
+                        pass
+                # Tree güncelle
+                vals_local = list(product_tree.item(item_id, "values"))
+                vals_local[5] = format_price(new_p)
+                try:
+                    qty_local = float(str(vals_local[4]).replace(",", "."))
+                except Exception:
+                    qty_local = current_qty
+                vals_local[6] = f"{float(new_p) * float(qty_local):.2f}"
+                product_tree.item(item_id, values=vals_local)
+                update_totals()
+
+            def read_from_entry():
+                try:
+                    return float(str(price_entry.get()).replace(",", ".").strip())
+                except Exception:
+                    return price_var.get()
+
+            def inc():
+                apply_price(read_from_entry() + step)
+            def dec():
+                apply_price(read_from_entry() - step)
+
+            frame.grid_propagate(False)
+            frame.columnconfigure(1, weight=1)
+            btn_minus = tk.Button(frame, text="-", font=("Segoe UI", 10, "bold"), bg="#dc3545", fg="white", bd=0, cursor="hand2", command=dec)
+            btn_plus = tk.Button(frame, text="+", font=("Segoe UI", 10, "bold"), bg="#28a745", fg="white", bd=0, cursor="hand2", command=inc)
+            price_entry = tk.Entry(frame, justify="center", font=("Segoe UI", 10, "bold"), bg="#f5e4c8", fg="#000", relief="flat")
+            price_entry.insert(0, format_price(current_price))
+            btn_minus.grid(row=0, column=0, sticky="nsw")
+            price_entry.grid(row=0, column=1, sticky="nsew")
+            btn_plus.grid(row=0, column=2, sticky="nse")
+
+            def on_price_keyrelease(e):
+                try:
+                    val = float(str(price_entry.get()).replace(",", ".").strip())
+                    apply_price(val, update_entry=False)
+                except Exception:
+                    pass
+
+            def on_price_commit(e=None):
+                apply_price(read_from_entry(), update_entry=True)
+
+            price_entry.bind('<KeyRelease>', on_price_keyrelease)
+            price_entry.bind('<FocusOut>', on_price_commit)
+            price_entry.bind('<Return>', lambda e: on_price_commit())
+        else:
+            try:
+                children = frame.winfo_children()
+                if len(children) >= 2 and isinstance(children[1], tk.Entry):
+                    children[1].delete(0, tk.END)
+                    children[1].insert(0, format_price(current_price))
+            except Exception:
+                pass
+        frame.place(x=x, y=y, width=w, height=h)
+
+    def refresh_all_qty_frames():
+        # Silinen item'ların frame'lerini temizle
+        existing_ids = set(product_tree.get_children())
+        for dct in (qty_frames, price_frames):
+            for iid in list(dct.keys()):
+                if iid not in existing_ids:
+                    try:
+                        if dct[iid].winfo_exists():
+                            dct[iid].destroy()
+                    except Exception:
+                        pass
+                    del dct[iid]
+        # Her görünür satır için frame üret/güncelle
+        for iid in product_tree.get_children():
+            build_qty_frame(iid)
+            build_price_frame(iid)
+
+    # Scroll ve yeniden boyutlandıkça konumları güncelle
+    def on_tree_configure(event):
+        refresh_all_qty_frames()
+    product_tree.bind('<Configure>', on_tree_configure)
+    product_tree.bind('<MouseWheel>', lambda e: (product_tree.after_idle(refresh_all_qty_frames)))
+    # İlk yüklemede çerçeveleri yerleştir
+    product_tree.after(120, refresh_all_qty_frames)
+
+
+    # Seçili satır miktarını +/- ile değiştir
+    def adjust_selected_qty(delta):
+        sel = product_tree.selection()
+        if not sel:
+            return
+        item = sel[0]
+        vals = list(product_tree.item(item, "values"))
+        try:
+            qty = float(vals[4])
+        except Exception:
+            qty = 0.0
+        pname = vals[2]
+        r = None
+        try:
+            r = product_svc.get_price_stock_by_name(cursor, pname)
+        except Exception:
+            pass
+        unit = str(r[2]) if r else "adet"
+        step = 0.1 if unit.lower().startswith("kg") else 1.0
+        stock = float(r[1]) if r else 999999
+        new_qty = qty + delta * step
+        if new_qty < 0:
+            new_qty = 0
+        if new_qty > stock:
+            new_qty = stock
+        try:
+            price = float(str(vals[5]).replace(",", "."))
+        except Exception:
+            price = 0.0
+        qty_text = f"{new_qty:.3f}" if (unit.lower().startswith("kg")) else f"{int(round(new_qty))}"
+        vals[4] = qty_text
+        vals[6] = f"{price * float(new_qty):.2f}"
+        product_tree.item(item, values=vals)
+        # Görsel miktar çerçevesini güncelle
+        build_qty_frame(item)
+        update_totals()
+
+    # Miktar hücresine gelince imleci "yazı" işaretine çevir (düzenlenebilir olduğu anlaşılsın)
+    def on_tree_motion(event):
+        region = product_tree.identify_region(event.x, event.y)
+        if region == "cell" and product_tree.identify_column(event.x) == "#5":
+            product_tree.config(cursor="xterm")
+        else:
+            product_tree.config(cursor="")
+
+    # Çift tıklamada özel editör açma kaldırıldı; sadece odaklanır
+    product_tree.bind("<Double-1>", lambda e: None)
+    product_tree.bind("<Motion>", on_tree_motion)
+    product_tree.bind("+", lambda e: adjust_selected_qty(+1))
+    product_tree.bind("-", lambda e: adjust_selected_qty(-1))
+    product_tree.bind("<KP_Add>", lambda e: adjust_selected_qty(+1))
+    product_tree.bind("<KP_Subtract>", lambda e: adjust_selected_qty(-1))
+
+    product_tree.bind("<Button-1>", on_tree_click)
+    product_tree.bind("<<TreeviewSelect>>", lambda e: destroy_qty_editor())
+    
+    # Kaydırma çubukları (taşma olduğunda görünür)
+    x_scroll = ttk.Scrollbar(product_frame, orient="horizontal", command=product_tree.xview)
+    y_scroll = ttk.Scrollbar(product_frame, orient="vertical", command=product_tree.yview)
+    # Scroll değişince miktar frame'lerini yeniden konumlandır
+    def on_tree_yview_changed(first, last):
+        y_scroll.set(first, last)
+        refresh_all_qty_frames()
+    def on_tree_xview_changed(first, last):
+        x_scroll.set(first, last)
+        refresh_all_qty_frames()
+    product_tree.configure(xscrollcommand=on_tree_xview_changed, yscrollcommand=on_tree_yview_changed)
+    y_scroll.pack(side="right", fill="y")
+    x_scroll.pack(side="bottom", fill="x")
+    product_tree.pack(side="left", fill="both", expand=True)
+    
+    # ORTA PANEL: Ödeme Bilgileri ve Hızlı İşlemler
+    center_panel = tk.Frame(middle_section, bg=BG_COLOR, width=420)
+    # Orta panelin dikeyde de genişleyebilmesi için expand=True yapıldı
+    center_panel.pack(side="left", fill="both", expand=True, padx=(0,8), pady=0)
+    center_panel.pack_propagate(False)
+    
+    # Ödeme bilgileri kutusu
+    payment_box = tk.Frame(center_panel, bg=CARD_COLOR)
+    payment_box.pack(fill="x", padx=0, pady=(0,8))
+    
+    # Ödenen / TUTAR / Para Üstü
+    info_grid = tk.Frame(payment_box, bg=CARD_COLOR)
+    info_grid.pack(fill="x", padx=12, pady=12)
+    
+    tk.Label(info_grid, text=t('paid'), font=("Segoe UI", 10), bg=CARD_COLOR, fg=TEXT_GRAY).grid(row=0, column=0, sticky="w", pady=2)
+    paid_label = tk.Label(info_grid, text="0", font=("Segoe UI", 18, "bold"), bg=CARD_COLOR, fg="white")
+    paid_label.grid(row=1, column=0, sticky="w", pady=2)
+    
+    tk.Label(info_grid, text=t('total').upper() + " :", font=("Segoe UI", 12), bg=CARD_COLOR, fg=TEXT_GRAY).grid(row=0, column=1, sticky="e", padx=20, pady=2)
+    total_label = tk.Label(info_grid, text="0.00", font=("Segoe UI", 28, "bold"), bg=CARD_COLOR, fg="#ff3333")
+    total_label.grid(row=1, column=1, sticky="e", padx=20, pady=2)
+    
+    tk.Label(info_grid, text=t('money_on_account'), font=("Segoe UI", 10), bg=CARD_COLOR, fg=TEXT_GRAY).grid(row=0, column=2, sticky="e", pady=2)
+    change_label = tk.Label(info_grid, text="0", font=("Segoe UI", 18, "bold"), bg=CARD_COLOR, fg="#00ff00")
+    change_label.grid(row=1, column=2, sticky="e", pady=2)
+    
+    info_grid.grid_columnconfigure(1, weight=1)
+    
+    # Hızlı tutar butonları
+    # Ödeme takibi için değişkenler
+    paid_amount = tk.DoubleVar(value=0.0)
+    
+    def update_payment_display():
+        """Ödenen, toplam ve para üstü bilgilerini günceller"""
+        try:
+            paid_val = paid_amount.get()
+            total_val = 0.0
+            
+            # Sepetteki ürünlerin toplam tutarını hesapla
+            for item in product_tree.get_children():
+                values = product_tree.item(item)['values']
+                # values: [Sil, No, Ürün Adı, Miktar, Birim, Fiyat, Toplam]
+                if len(values) >= 7:
+                    try:
+                        item_total = float(values[6])
+                        total_val += item_total
+                    except (ValueError, IndexError):
+                        pass
+            
+            # Etiketleri güncelle
+            paid_label.config(text=f"{paid_val:.2f}")
+            total_label.config(text=f"{total_val:.2f}")
+            
+            change = paid_val - total_val
+            change_label.config(text=f"{change:.2f}")
+            
+            # Para üstü rengini ayarla
+            if change >= 0:
+                change_label.config(fg="#00ff00")
+            else:
+                change_label.config(fg="#ff3333")
+                
+        except Exception as e:
+            print(f"Ödeme güncelleme hatası: {e}")
+    
+    def add_to_paid(amount):
+        """Ödenen tutara miktar ekler veya ayarlar"""
+        try:
+            current = paid_amount.get()
+            if isinstance(amount, str):
+                # +5, -5, +10, -10 gibi değerler
+                if amount.startswith("+"):
+                    new_amount = current + float(amount[1:])
+                elif amount.startswith("-"):
+                    new_amount = max(0, current - float(amount[1:]))
+                else:
+                    new_amount = float(amount)
+            else:
+                # 5, 10, 20, 50, 100, 200 gibi sabit değerler
+                new_amount = float(amount)
+            
+            paid_amount.set(new_amount)
+            update_payment_display()
+        except Exception as e:
+            print(f"Tutar ekleme hatası: {e}")
+    
+    quick_amount_label = tk.Label(center_panel, text=t('quick_amounts'), font=("Segoe UI", 10),
+                                  bg=BG_COLOR, fg=TEXT_GRAY)
+    quick_amount_label.pack(anchor="w", padx=4, pady=(4,2))
+    
+    quick_btns_frame = tk.Frame(center_panel, bg=BG_COLOR)
+    quick_btns_frame.pack(fill="x", padx=0, pady=2)
+    
+    quick_values = [5, 10, 20, 50, 100, 200, "+5", "-5", "+10", "-10"]
+    for val in quick_values:
+        btn_text = str(val)
+        btn = tk.Button(quick_btns_frame, text=btn_text, font=("Segoe UI", 10, "bold"),
+                       bg="#007bff", fg="white", relief="flat", padx=0, pady=8,
+                       cursor="hand2", borderwidth=0, activebackground="#0056b3",
+                       command=lambda v=val: add_to_paid(v))
+        btn.pack(side="left", fill="x", expand=True, padx=2)
+    
+    # Ödeme yöntemi butonları
+    payment_methods_frame = tk.Frame(center_panel, bg=BG_COLOR)
+    payment_methods_frame.pack(fill="x", padx=0, pady=8)
+    
+    payment_var = tk.StringVar(value="NAKİT")
+    
+    nakit_btn = tk.Button(payment_methods_frame, text="💵 " + t('cash_register') + "\n(F8)",
+                         font=("Segoe UI", 10, "bold"), bg="#28a745", fg="white",
+                         relief="flat", padx=0, pady=14, cursor="hand2", borderwidth=0,
+                         activebackground="#218838", command=lambda: payment_var.set("NAKİT"))
+    nakit_btn.pack(side="left", fill="x", expand=True, padx=2)
+    
+    pos_btn = tk.Button(payment_methods_frame, text="💳 " + t('pos_payment') + "\n(F9)",
+                       font=("Segoe UI", 10, "bold"), bg="#17a2b8", fg="white",
+                       relief="flat", padx=0, pady=14, cursor="hand2", borderwidth=0,
+                       activebackground="#138496", command=lambda: payment_var.set("POS"))
+    pos_btn.pack(side="left", fill="x", expand=True, padx=2)
+    
+    open_acc_btn = tk.Button(payment_methods_frame, text="📋 " + t('open_account') + "\n(F10)",
+                            font=("Segoe UI", 10, "bold"), bg="#fd7e14", fg="white",
+                            relief="flat", padx=0, pady=14, cursor="hand2", borderwidth=0,
+                            activebackground="#e96d0b", command=lambda: payment_var.set("AÇIK HESAP"))
+    open_acc_btn.pack(side="left", fill="x", expand=True, padx=2)
+    
+    fragmented_btn = tk.Button(payment_methods_frame, text="🔀 " + t('fragmented'),
+                              font=("Segoe UI", 10, "bold"), bg="#007bff", fg="white",
+                              relief="flat", padx=0, pady=14, cursor="hand2", borderwidth=0,
+                              activebackground="#0056b3", command=lambda: payment_var.set("PARÇALI"))
+    fragmented_btn.pack(side="left", fill="x", expand=True, padx=2)
+    
+    # HIZLI ÜRÜNLER: Ödeme butonlarının altında (orta panelde)
+    quick_panel = tk.Frame(center_panel, bg=BG_COLOR)
+    quick_panel.pack(fill="both", expand=True, padx=0, pady=(8,0))
+    
+    # Liste kodları ve aktif liste
+    LISTS = [
+        ("main",  t('main_list')),
+        ("list_1", t('list_1')),
+        ("list_2", t('list_2')),
+        ("list_3", t('list_3')),
+        ("list_4", t('list_4')),
+    ]
+    active_list_code = tk.StringVar(value="main")
+
+    # DB yardımcıları
+    def db_quick_list(list_code: str):
+        try:
+            cursor.execute("SELECT id, list_code, name, price, sort_order FROM quick_products WHERE list_code=? ORDER BY sort_order, id", (list_code,))
+            return cursor.fetchall()
+        except Exception:
+            return []
+
+    def db_quick_get(pid: int):
+        cursor.execute("SELECT id, list_code, name, price, sort_order FROM quick_products WHERE id=?", (pid,))
+        return cursor.fetchone()
+
+    def db_quick_insert(list_code: str, name: str, price: float):
+        cursor.execute("INSERT INTO quick_products(list_code, name, price, sort_order) VALUES(?,?,?,?)", (list_code, name, price, 0))
+        conn.commit()
+        return cursor.lastrowid
+
+    def db_quick_update(pid: int, list_code: str, name: str, price: float):
+        cursor.execute("UPDATE quick_products SET list_code=?, name=?, price=? WHERE id=?", (list_code, name, price, pid))
         conn.commit()
 
-        # Yazdırma seçimi
+    def db_quick_delete(pid: int):
+        cursor.execute("DELETE FROM quick_products WHERE id=?", (pid,))
+        conn.commit()
+    
+    def db_get_top_products(limit=10):
+        """En çok satılan ürünleri getir"""
+        try:
+            cursor.execute("""
+                SELECT product_name, SUM(quantity) as total_qty, 
+                       (SELECT COALESCE(sale_price, price) FROM products WHERE name=sales.product_name LIMIT 1) as price
+                FROM sales 
+                WHERE (canceled IS NULL OR canceled=0)
+                GROUP BY product_name 
+                ORDER BY total_qty DESC 
+                LIMIT ?
+            """, (limit,))
+            return cursor.fetchall()
+        except Exception:
+            return []
+    
+    def db_get_all_products():
+        """Tüm ürünleri getir (ürün ekleme için)"""
+        try:
+            cursor.execute("SELECT name, COALESCE(sale_price, price) FROM products ORDER BY name")
+            return cursor.fetchall()
+        except Exception:
+            return []
+
+    # Başlık ve sekmeler - aynı satırda yan yana
+    header_row = tk.Frame(quick_panel, bg=BG_COLOR)
+    header_row.pack(fill="x", padx=4, pady=(0,4))
+
+    tk.Label(header_row, text=t('quick_products'), font=("Segoe UI", 10, "bold"),
+             bg=BG_COLOR, fg="white").pack(side="left", padx=(4,8))
+    
+    def change_list(code: str):
+        active_list_code.set(code)
+        reload_quick_products()
+
+    for code, title in LISTS:
+        btn = tk.Button(header_row, text=title, font=("Segoe UI", 8),
+                        bg="#6c757d", fg="white", relief="flat", padx=8, pady=3,
+                        cursor="hand2", borderwidth=0, activebackground="#5a6268",
+                        command=lambda c=code: change_list(c))
+        btn.pack(side="left", padx=1)
+    
+    # Scrollable container için Canvas + Scrollbar
+    scroll_container = tk.Frame(quick_panel, bg=BG_COLOR)
+    scroll_container.pack(fill="both", expand=True, padx=0, pady=0)
+    
+    # Canvas
+    canvas = tk.Canvas(scroll_container, bg=BG_COLOR, highlightthickness=0)
+    canvas.pack(side="left", fill="both", expand=True)
+    
+    # İnce scrollbar
+    scrollbar = tk.Scrollbar(scroll_container, orient="vertical", command=canvas.yview, width=8)
+    scrollbar.pack(side="right", fill="y")
+    
+    canvas.configure(yscrollcommand=scrollbar.set)
+    
+    # Grid container canvas içinde
+    quick_products_grid = tk.Frame(canvas, bg=BG_COLOR)
+    canvas_window = canvas.create_window((0, 0), window=quick_products_grid, anchor="nw")
+    
+    # Canvas scroll bölgesini güncelle
+    def update_scroll_region(event=None):
+        canvas.update_idletasks()
+        canvas.configure(scrollregion=canvas.bbox("all"))
+    
+    quick_products_grid.bind("<Configure>", update_scroll_region)
+    
+    # Canvas genişliğini ayarla
+    def resize_canvas(event=None):
+        canvas.update_idletasks()
+        canvas_width = canvas.winfo_width()
+        canvas.itemconfig(canvas_window, width=canvas_width)
+    
+    canvas.bind("<Configure>", resize_canvas)
+    
+    # Mouse wheel scroll desteği
+    def on_mousewheel(event):
+        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    
+    canvas.bind_all("<MouseWheel>", on_mousewheel)
+    
+    # Not: Hızlı ürünler artık veritabanından okunuyor (quick_products)
+    
+    def quick_product_click(product_name):
+        """Hızlı ürün kartına tıklandığında ürünü sepete ekler"""
+        try:
+            # İleride add_product_to_cart fonksiyonu tanımlanacak
+            # Şimdilik ürün adını yazdırıyoruz
+            add_product_to_cart(product_name, 1)
+        except Exception as e:
+            messagebox.showerror("Hata", f"Ürün eklenirken hata: {e}")
+    
+    # Kartları ve meta bilgilerini tut
+    quick_product_cards = []
+    quick_card_meta: dict[int, dict] = {}
+    
+    # Hızlı ürün ekleme formu
+    def show_add_quick_product_dialog(existing: dict | None = None):
+        """Hızlı ürün ekleme popup penceresi"""
+        dialog = tk.Toplevel(parent)
+        dialog.title("Hızlı Ürün Ekle" if existing is None else "Hızlı Ürün Düzenle")
+        dialog.geometry("450x280")
+        dialog.resizable(False, False)
+        dialog.transient(parent)
+        dialog.grab_set()
+        
+        # Ortala
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (450 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (280 // 2)
+        dialog.geometry(f"450x280+{x}+{y}")
+        
+        set_theme(dialog)
+        
+        # İçerik frame
+        content = tk.Frame(dialog, bg=BG_COLOR)
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Başlık
+        tk.Label(content, text=("➕ Yeni Hızlı Ürün Ekle" if existing is None else "✏️ Hızlı Ürün Düzenle"), font=("Segoe UI", 14, "bold"),
+                 bg=BG_COLOR, fg="white").pack(pady=(0,15))
+        
+        # Liste seçimi
+        list_frame = tk.Frame(content, bg=BG_COLOR)
+        list_frame.pack(fill="x", pady=(0,10))
+        tk.Label(list_frame, text="Liste:", font=("Segoe UI", 10),
+                 bg=BG_COLOR, fg=TEXT_GRAY).pack(side="left", padx=(0,10))
+
+        list_var = tk.StringVar(value="main")
+        list_combo = ttk.Combobox(list_frame, textvariable=list_var,
+                                  values=[code for code, _ in LISTS],
+                                  state="readonly", width=25, font=("Segoe UI", 10))
+        list_combo.pack(side="left", fill="x", expand=True)
+        
+        # Ürün seçimi - arama yapılabilir
+        name_frame = tk.Frame(content, bg=BG_COLOR)
+        name_frame.pack(fill="x", pady=(0,10))
+        tk.Label(name_frame, text="Ürün Seç:", font=("Segoe UI", 10),
+                 bg=BG_COLOR, fg=TEXT_GRAY).pack(side="left", padx=(0,10))
+
+        # Ürün listesini çek
+        all_products = db_get_all_products()
+        product_names = [p[0] for p in all_products]
+        product_prices = {p[0]: p[1] for p in all_products}
+        
+        name_var = tk.StringVar()
+        name_combo = ttk.Combobox(name_frame, textvariable=name_var,
+                                  values=product_names,
+                                  font=("Segoe UI", 10))
+        name_combo.pack(side="left", fill="x", expand=True)
+        name_combo.focus()
+        
+        # Arama özelliği - sadece filtrele
+        def on_keyup(event):
+            # Özel tuşları atla
+            if event.keysym in ('Up', 'Down', 'Left', 'Right', 'Return', 'Tab', 'Escape'):
+                return
+            
+            # Yazılan metin
+            typed = name_var.get().lower()
+            
+            if typed == '':
+                # Boşsa tüm listeyi göster
+                name_combo['values'] = product_names
+            else:
+                # Filtrelenmiş liste
+                filtered = [p for p in product_names if typed in p.lower()]
+                name_combo['values'] = filtered
+        
+        name_combo.bind('<KeyRelease>', on_keyup)
+        
+        def on_product_select(event):
+            selected = name_var.get()
+            if selected and selected in product_prices:
+                # Otomatik fiyat doldur
+                price_entry.delete(0, tk.END)
+                price_entry.insert(0, f"{product_prices[selected]:.2f}")
+                # Listeyi sıfırla
+                name_combo['values'] = product_names
+        
+        name_combo.bind("<<ComboboxSelected>>", on_product_select)
+        
+        # Fiyat
+        price_frame = tk.Frame(content, bg=BG_COLOR)
+        price_frame.pack(fill="x", pady=(0,15))
+        tk.Label(price_frame, text="Fiyat (₺):", font=("Segoe UI", 10),
+                bg=BG_COLOR, fg=TEXT_GRAY).pack(side="left", padx=(0,10))
+        
+        price_entry = ttk.Entry(price_frame, font=("Segoe UI", 10), width=15)
+        price_entry.pack(side="left")
+        
+        # Butonlar
+        btn_frame = tk.Frame(content, bg=BG_COLOR)
+        btn_frame.pack(fill="x", pady=(10,0))
+        
+        if existing is not None:
+            # Prefill (düzenleme modunda)
+            try:
+                name_var.set(existing.get('name',''))
+                price_entry.insert(0, f"{existing.get('price',0):.2f}")
+                list_var.set(existing.get('list_code','main'))
+            except Exception:
+                pass
+
+        def save_quick_product():
+            """Hızlı ürünü kaydet"""
+            name = name_var.get().strip()
+            price_str = price_entry.get().strip()
+            
+            if not name:
+                messagebox.showwarning("Uyarı", "Lütfen ürün seçin!", parent=dialog)
+                return
+            
+            # Ürünün listede olup olmadığını kontrol et (düzenleme modunda esnek)
+            if existing is None and name not in product_names:
+                messagebox.showwarning("Uyarı", "Lütfen listeden geçerli bir ürün seçin!", parent=dialog)
+                return
+            
+            if not price_str:
+                messagebox.showwarning("Uyarı", "Lütfen fiyat girin!", parent=dialog)
+                return
+            
+            try:
+                price = float(price_str.replace(",", "."))
+            except ValueError:
+                messagebox.showwarning("Uyarı", "Geçerli bir fiyat girin!", parent=dialog)
+                return
+            
+            list_code = list_var.get()
+
+            if existing is None:
+                db_quick_insert(list_code, name, price)
+                msg = f"'{name}' eklendi."
+            else:
+                db_quick_update(existing['id'], list_code, name, price)
+                msg = f"'{name}' güncellendi."
+
+            reload_quick_products()
+            messagebox.showinfo("Başarılı", msg, parent=dialog)
+            dialog.destroy()
+        
+        save_btn = tk.Button(btn_frame, text="💾 Kaydet", font=("Segoe UI", 10, "bold"),
+                            bg="#28a745", fg="white", relief="flat", padx=20, pady=8,
+                            cursor="hand2", command=save_quick_product)
+        save_btn.pack(side="right", padx=(5,0))
+        
+        cancel_btn = tk.Button(btn_frame, text="❌ İptal", font=("Segoe UI", 10),
+                              bg="#6c757d", fg="white", relief="flat", padx=20, pady=8,
+                              cursor="hand2", command=dialog.destroy)
+        cancel_btn.pack(side="right")
+        
+        # Enter tuşu ile kaydet
+        dialog.bind("<Return>", lambda e: save_quick_product())
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+    
+    def make_quick_card(pname, pprice, is_add_button=False, pid: int | None = None, list_code: str | None = None):
+        """Her kart için closure oluşturan yardımcı fonksiyon"""
+        card = tk.Frame(quick_products_grid, bg="#343a40" if not is_add_button else "#28a745",
+                       relief="solid", bd=1, cursor="hand2", highlightthickness=0)
+        
+        if is_add_button:
+            # "+" ekleme butonu - kompakt
+            def on_add_click(e):
+                show_add_quick_product_dialog()
+            
+            card.bind("<Button-1>", on_add_click)
+            
+            icon_label = tk.Label(card, text="➕", font=("Segoe UI", 16, "bold"),
+                                 bg="#28a745", fg="white", cursor="hand2")
+            icon_label.place(relx=0.5, rely=0.5, anchor="center")
+            icon_label.bind("<Button-1>", on_add_click)
+            
+            return card
+        else:
+            # Normal ürün kartı - daha kompakt
+            def on_click(e):
+                quick_product_click(pname)
+            
+            card.bind("<Button-1>", on_click)
+
+            name_label = tk.Label(card, text=pname, font=("Segoe UI", 7, "bold"),
+                                  bg="#343a40", fg="white", cursor="hand2",
+                                  wraplength=100, justify="center", anchor="center")
+            name_label.place(relx=0.5, rely=0.35, anchor="center")
+            name_label.bind("<Button-1>", on_click)
+
+            price_label = tk.Label(card, text=pprice, font=("Segoe UI", 9, "bold"),
+                                   bg="#343a40", fg="#ffc107", cursor="hand2", anchor="center")
+            price_label.place(relx=0.5, rely=0.70, anchor="center")
+            price_label.bind("<Button-1>", on_click)
+
+            # Sağ tık menüsü (Düzenle / Sil)
+            if pid is not None:
+                def show_ctx(event):
+                    menu = None
+                    try:
+                        menu = tk.Menu(card, tearoff=0)
+                        menu.add_command(label="✏️ Düzenle", command=lambda: show_add_quick_product_dialog({
+                            'id': pid, 'list_code': list_code or 'main', 'name': pname, 'price': float(str(pprice).replace('₺','').strip())
+                        }))
+                        def do_delete():
+                            if messagebox.askyesno("Sil", f"'{pname}' silinsin mi?"):
+                                db_quick_delete(pid); reload_quick_products()
+                        menu.add_command(label="🗑 Sil", command=do_delete)
+                        menu.tk_popup(event.x_root, event.y_root)
+                    finally:
+                        if menu is not None:
+                            try:
+                                menu.grab_release()
+                            except Exception:
+                                pass
+                card.bind("<Button-3>", show_ctx)
+
+            return card
+    
+    def reload_quick_products():
+        # Temizle mevcut kartlar
+        for c in quick_product_cards:
+            try:
+                c.destroy()
+            except Exception:
+                pass
+        quick_product_cards.clear(); quick_card_meta.clear()
+
+        current_list = active_list_code.get()
+        
+        # ANA sekmesi için en çok satılan ürünleri göster
+        if current_list == 'main':
+            # Önce veritabanından kayıtlı hızlı ürünleri kontrol et
+            rows = db_quick_list('main')
+            
+            # Eğer yoksa, en çok satılan ürünlerden otomatik ekle
+            if not rows:
+                top_products = db_get_top_products(limit=10)
+                if top_products:
+                    try:
+                        for product_name, total_qty, price in top_products:
+                            if price is not None:
+                                db_quick_insert('main', product_name, price)
+                        rows = db_quick_list('main')
+                    except Exception as e:
+                        pass
+        else:
+            # Diğer listeler için normal yükleme
+            rows = db_quick_list(current_list)
+
+        for pid, list_code_val, name, price, sort_order in rows:
+            card = make_quick_card(name, f"₺ {price:g}", False, pid=pid, list_code=list_code_val)
+            quick_product_cards.append(card)
+            quick_card_meta[id(card)] = {'id': pid, 'name': name, 'price': price, 'list_code': list_code_val}
+
+        # Son olarak "+" butonu
+        quick_product_cards.append(make_quick_card("", "", is_add_button=True))
+        relayout_quick_products()
+
+    def relayout_quick_products(event=None):
+        """Dinamik grid yerleşimi - genişliğe göre responsive"""
+        try:
+            quick_products_grid.update_idletasks()
+            width = quick_products_grid.winfo_width()
+            if width <= 1:
+                width = 420
+        except Exception:
+            width = 420
+        
+        # Responsive sütun sayısı (daha kompakt için daha fazla sütun)
+        if width >= 360:
+            cols = 3
+            card_h = 65  # daha küçük
+        elif width >= 240:
+            cols = 2
+            card_h = 60
+        else:
+            cols = 1
+            card_h = 55
+        
+        # Tüm kartları grid'den kaldır
+        for card in quick_product_cards:
+            card.grid_forget()
+
+        # Grid sütunlarını yapılandır
+        for i in range(4):
+            quick_products_grid.grid_columnconfigure(i, weight=0, minsize=0)
+        for i in range(cols):
+            quick_products_grid.grid_columnconfigure(i, weight=1, uniform="qp")
+
+        # Tüm kartları yerleştir (hiçbirini gizleme)
+        row = col = 0
+        for card in quick_product_cards:
+            card.grid(row=row, column=col, padx=2, pady=2, sticky="nsew")  # padding küçültüldü
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
+        
+        # Satır yüksekliklerini ayarla
+        for r in range(row + 1):
+            quick_products_grid.grid_rowconfigure(r, weight=0, minsize=card_h)
+        
+        # Canvas scroll bölgesini güncelle
+        canvas.update_idletasks()
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+    # İlk yükleme
+    quick_products_grid.after(100, reload_quick_products)
+    
+    # Boyut değişimlerinde otomatik yeniden yerleşim
+    quick_products_grid.bind("<Configure>", relayout_quick_products)
+    
+    # Global referans: menü toggle'dan tetiklemek için
+    parent._relayout_quick_products = relayout_quick_products
+    
+    # === ALT BÖLÜM: Müşteri Bilgileri ve Satış Yap ===
+    bottom_section = tk.Frame(content_container, bg=CARD_COLOR)
+    bottom_section.pack(fill="x", padx=12, pady=(4,8))
+    
+    bottom_left = tk.Frame(bottom_section, bg=CARD_COLOR)
+    bottom_left.pack(side="left", fill="both", expand=True, padx=12, pady=12)
+    
+    # Müşteri İsmi
+    tk.Label(bottom_left, text="👤 " + t('customer_name'), font=("Segoe UI", 9),
+             bg=CARD_COLOR, fg=TEXT_GRAY).grid(row=0, column=0, sticky="w", pady=2)
+    customer_entry = ttk.Entry(bottom_left, font=("Segoe UI", 10), width=25)
+    customer_entry.grid(row=1, column=0, sticky="ew", pady=2, padx=(0,8))
+    
+    # Otomatik cari arama (yazarken açılan öneri penceresi)
+    customer_cache_rows = None  # [(id, name, phone, balance), ...]
+    customer_popup_win = None   # Toplevel
+    customer_popup_list = None  # Listbox
+    current_results = []        # filtrelenmiş satırlar
+
+    def hide_customer_popup():
+        nonlocal customer_popup_win, customer_popup_list, current_results
+        if customer_popup_win is not None:
+            try:
+                customer_popup_win.destroy()
+            except Exception:
+                pass
+            customer_popup_win = None
+            customer_popup_list = None
+            current_results = []
+
+    def select_customer(index: int):
+        nonlocal current_results
+        if index < 0 or index >= len(current_results):
+            hide_customer_popup(); return
+        _cid, name, phone, _bal = current_results[index]
+        customer_entry.delete(0, tk.END); customer_entry.insert(0, str(name))
+        phone_entry.delete(0, tk.END); phone_entry.insert(0, str(phone or ""))
+        hide_customer_popup()
+
+    def show_customer_popup():
+        nonlocal customer_popup_win, customer_popup_list, current_results
+        if not current_results:
+            hide_customer_popup(); return
+        # pencereyi oluştur/konumlandır
+        win = customer_popup_win
+        lb = customer_popup_list
+        if win is None:
+            win = tk.Toplevel(parent)
+            win.overrideredirect(True)
+            win.attributes("-topmost", True)
+            set_theme(win)
+            lb = tk.Listbox(win, height=6)
+            lb.pack(fill="both", expand=True)
+            def on_double(_=None):
+                sel = lb.curselection()
+                if sel:
+                    select_customer(int(sel[0]))
+            lb.bind("<Double-Button-1>", on_double)
+            lb.bind("<Return>", on_double)
+            customer_popup_win = win
+            customer_popup_list = lb
+        # konum ve içerik
+        try:
+            x = customer_entry.winfo_rootx()
+            y = customer_entry.winfo_rooty() + customer_entry.winfo_height()
+            w = max(260, customer_entry.winfo_width())
+            win.geometry(f"{w}x150+{x}+{y}")
+        except Exception:
+            pass
+        if lb is None:
+            return
+        lb.delete(0, tk.END)
+        for _cid, name, phone, bal in current_results[:50]:
+            lb.insert(tk.END, f"{name} | {phone or ''}")
+        lb.selection_clear(0, tk.END)
+        lb.selection_set(0)
+        lb.activate(0)
+
+    def on_customer_typed(e=None):
+        from services import cari_service as cs
+        q = customer_entry.get().strip().lower()
+        nonlocal customer_cache_rows, current_results
+        if customer_cache_rows is None:
+            try:
+                customer_cache_rows = cs.list_all(cursor)
+            except Exception:
+                customer_cache_rows = []
+        if not q:
+            hide_customer_popup(); return
+        res = []
+        for cid, name, phone, address, balance, cari_type in customer_cache_rows:
+            if q in str(name).lower() or q in str(phone or "").lower():
+                res.append((cid, name, phone, balance))
+        current_results = res
+        show_customer_popup()
+
+    def on_customer_keydown(e):
+        nonlocal customer_popup_list
+        if customer_popup_list is None:
+            return
+        lb = customer_popup_list
+        if e.keysym in ("Down",):
+            try:
+                cur = lb.curselection()[0] if lb.curselection() else -1
+                nxt = min(cur + 1, lb.size()-1)
+                lb.selection_clear(0, tk.END); lb.selection_set(nxt); lb.activate(nxt)
+            except Exception:
+                pass
+            return "break"
+        if e.keysym in ("Up",):
+            try:
+                cur = lb.curselection()[0] if lb.curselection() else 0
+                nxt = max(cur - 1, 0)
+                lb.selection_clear(0, tk.END); lb.selection_set(nxt); lb.activate(nxt)
+            except Exception:
+                pass
+            return "break"
+        if e.keysym in ("Return",):
+            try:
+                cur = customer_popup_list.curselection()
+                if cur:
+                    select_customer(int(cur[0]))
+                    return "break"
+            except Exception:
+                pass
+        if e.keysym in ("Escape",):
+            hide_customer_popup(); return "break"
+
+    customer_entry.bind("<KeyRelease>", lambda e: on_customer_typed())
+    customer_entry.bind("<KeyPress>", on_customer_keydown)
+    customer_entry.bind("<FocusOut>", lambda e: parent.after(150, hide_customer_popup))
+    
+    # Satışa dair notlar
+    tk.Label(bottom_left, text="📝 " + t('sales_note'), font=("Segoe UI", 9),
+             bg=CARD_COLOR, fg=TEXT_GRAY).grid(row=0, column=1, sticky="w", pady=2)
+    notes_entry = ttk.Entry(bottom_left, font=("Segoe UI", 10), width=30)
+    notes_entry.grid(row=1, column=1, sticky="ew", pady=2, padx=(0,8))
+    
+    # Telefon (SMS için)
+    tk.Label(bottom_left, text="📱 " + t('customer_phone'), font=("Segoe UI", 9),
+             bg=CARD_COLOR, fg=TEXT_GRAY).grid(row=0, column=2, sticky="w", pady=2)
+    phone_entry = ttk.Entry(bottom_left, font=("Segoe UI", 10), width=20)
+    phone_entry.grid(row=1, column=2, sticky="ew", pady=2)
+    
+    bottom_left.grid_columnconfigure(0, weight=1)
+    bottom_left.grid_columnconfigure(1, weight=1)
+    bottom_left.grid_columnconfigure(2, weight=1)
+    
+    # Ödeme seçici ve limit bilgisi
+    payment_selector = tk.Frame(bottom_left, bg=CARD_COLOR)
+    payment_selector.grid(row=2, column=0, columnspan=2, sticky="w", pady=(8,4))
+    
+    tk.Checkbutton(payment_selector, text=t('sms_receipt'), font=("Segoe UI", 9),
+                  bg=CARD_COLOR, fg=TEXT_GRAY, selectcolor="#1a1a20").pack(side="left", padx=(0,12))
+    
+    ttk.Combobox(payment_selector, values=[t('cash_register'), t('credit_card'), t('bank_transfer')], 
+                state="readonly", width=15, font=("Segoe UI", 9)).pack(side="left")
+    
+    # Limit bilgisi
+    tk.Label(bottom_left, text=t('limit_info'), font=("Segoe UI", 8),
+             bg=CARD_COLOR, fg=TEXT_GRAY).grid(row=2, column=2, sticky="e", pady=(8,4))
+    
+    # SMS notu
+    tk.Label(bottom_left, text=t('sms_note'), font=("Segoe UI", 8, "italic"),
+             bg=CARD_COLOR, fg="#666").grid(row=3, column=0, columnspan=3, sticky="w", pady=(4,0))
+    
+    # SATIŞ YAP butonu (sağ)
+    complete_sale_btn = tk.Button(bottom_section, text="✅ " + t('complete_sale_btn'),
+                                  font=("Segoe UI", 16, "bold"), bg="#28a745", fg="white",
+                                  relief="flat", padx=40, pady=24, cursor="hand2",
+                                  borderwidth=0, activebackground="#218838")
+    complete_sale_btn.pack(side="right", padx=12, pady=12)
+    
+    # === FONKSİYONLAR ===
+    def add_product_to_cart(pname, qty=1):
+        """Ürünü sepete ekle"""
+        r = product_svc.get_price_stock_by_name(cursor, pname)
+        if not r:
+            return
+        price, stock, unit = float(r[0]), float(r[1]), str(r[2])
+        if qty > stock:
+            messagebox.showerror(t('error'), t('insufficient_stock').format(stock=stock))
+            return
+        
+        # Tabloya ekle
+        seq = len(product_tree.get_children()) + 1
+        tags = ('evenrow',) if seq % 2 == 0 else ('oddrow',)
+        # Miktarı birime göre uygun formatta yaz
+        qty_text = f"{qty:.3f}" if unit.lower().startswith("kg") else f"{int(round(qty))}"
+        # Barkod (varsa)
+        try:
+            cursor.execute("SELECT COALESCE(barcode,'') FROM products WHERE name=? LIMIT 1", (pname,))
+            rbc = cursor.fetchone()
+            barcode_val = str(rbc[0]) if rbc and rbc[0] is not None else ''
+        except Exception:
+            barcode_val = ''
+        # Kategori adı (varsa)
+        try:
+            from repositories import category_repository
+            cat_name = category_repository.get_name_by_product_name(cursor, pname) or "-"
+        except Exception:
+            cat_name = "-"
+        iid = product_tree.insert("", "end", values=("❌", barcode_val, pname, cat_name, qty_text, f"{price:.2f}", f"{price*float(qty):.2f}"), tags=tags)
+        # Satır eklendikten sonra miktar/fiyat çerçevesini oluştur
+        product_tree.after(90, lambda: (build_qty_frame(iid), build_price_frame(iid)))
+        update_totals()
+    
+    def update_totals():
+        """Toplamları güncelle"""
+        total = 0.0
+        count = 0
+        for item in product_tree.get_children():
+            vals = product_tree.item(item)["values"]
+            if len(vals) >= 7:
+                try:
+                    total += float(str(vals[6]).replace(",", "."))
+                except Exception:
+                    pass
+                count += 1
+        
+        total_label.config(text=f"{total:.2f}")
+        # Ürün sayısını güncelle
+        for widget in left_panel.winfo_children():
+            if isinstance(widget, tk.Frame):
+                for label in widget.winfo_children():
+                    if isinstance(label, tk.Label) and t('products') in label.cget("text"):
+                        label.config(text=t('products') + f" 🗂️ {count}")
+        
+        # Ödeme bilgilerini güncelle
+        update_payment_display()
+    
+    def barcode_scan(event):
+        """Barkod okutulduğunda"""
+        barcode = barcode_entry.get().strip()
+        if not barcode or "Okutunuz" in barcode:
+            return
+        
+        result = product_svc.get_by_barcode(cursor, barcode)
+        if result:
+            pid, pname, price, stock, unit = result
+            add_product_to_cart(pname, 1)
+            barcode_entry.delete(0, tk.END)
+            barcode_entry.insert(0, "Ürün Barkodunu Okutunuz...")
+            barcode_entry.config(fg="#999999")
+    
+    def barcode_focus_in(event):
+        if "Okutunuz" in barcode_entry.get():
+            barcode_entry.delete(0, tk.END)
+            barcode_entry.config(fg="#333333")
+    
+    def barcode_focus_out(event):
+        if not barcode_entry.get().strip():
+            barcode_entry.insert(0, "Ürün Barkodunu Okutunuz...")
+            barcode_entry.config(fg="#999999")
+    
+    def complete_sale():
+        """Satışı tamamla"""
+        items = product_tree.get_children()
+        if not items:
+            messagebox.showwarning(t('warning'), t('cart_empty'))
+            return
+        
+        customer = customer_entry.get().strip() or t('customer')
+        payment_method = payment_var.get()
+        
+        fis_id = f"FIS-{datetime.now().strftime('%Y%m%d')}-{os.urandom(3).hex().upper()}"
+        sales_list = []
+        
+        for item in items:
+            vals = product_tree.item(item)["values"]
+            # Sütunlar: Sil, Barkod, Ürün adı, Kategori, Miktar, Fiyat, Tutar
+            pname = vals[2]
+            # Virgül/nokta farklarına karşı korumalı dönüştürme
+            def num(v):
+                try:
+                    return float(str(v).replace(".", ".").replace(",", "."))
+                except Exception:
+                    return 0.0
+            qty = num(vals[4])
+            price = num(vals[5])
+            total = num(vals[6])
+            
+            # Stoktan düş
+            product_svc.decrement_stock(conn, cursor, pname, qty)
+            # Satışı kaydet
+            sales_svc.insert_sale_line(conn, cursor, fis_id, pname, qty, price, total, payment_method=payment_method.lower())
+            sales_list.append((pname, qty, price, total))
+        
+        conn.commit()
+        
+        # Fiş yazdır
         print_choice = messagebox.askyesnocancel(
             t('print_receipt'),
             f"{t('receipt_created')}\n\n{t('print_options')}\n\n" +
@@ -1345,37 +2853,78 @@ def mount_sales(parent):
             f"Hayır = PDF\n" +
             f"İptal = {t('no_print')}"
         )
+        
         if print_choice is True:
-            print_thermal_receipt(sales_list, fis_id=fis_id, customer_name=customer_name,
-                                  kdv_rate=vat_rate, discount_rate=discount_val, vat_included=vat_included_flag,
+            print_thermal_receipt(sales_list, fis_id=fis_id, customer_name=customer,
+                                  kdv_rate=18.0, discount_rate=0.0, vat_included=False,
                                   language_code=CURRENT_LANGUAGE)
-            print_receipt(sales_list, fis_id=fis_id, customer_name=customer_name,
-                          kdv_rate=vat_rate, discount_rate=discount_val, vat_included=vat_included_flag,
-                          open_after=False, show_message=False, language_code=CURRENT_LANGUAGE)
+            print_receipt(sales_list, fis_id=fis_id, customer_name=customer,
+                         kdv_rate=18.0, discount_rate=0.0, vat_included=False,
+                         open_after=False, show_message=False, language_code=CURRENT_LANGUAGE)
         elif print_choice is False:
-            print_receipt(sales_list, fis_id=fis_id, customer_name=customer_name,
-                          kdv_rate=vat_rate, discount_rate=discount_val, vat_included=vat_included_flag,
-                          language_code=CURRENT_LANGUAGE)
-
-        # Ekran bildirimi (brüt tutar üzerinden indirim uygula)
-        discount_amount = subtotal_gross * (discount_val/100.0)
-        grand_total = subtotal_gross - discount_amount
-        messagebox.showinfo(t('success'), f"{t('customer')}: {customer_name}\n{t('receipt_no')} {fis_id}\n{t('total')}: {grand_total:.2f} ₺")
-
-        # Temizle
-        for r in tree.get_children(): tree.delete(r)
-        update_total_label(); cb_product.set(""); lbl_price.config(text="-"); lbl_stock.config(text="-")
-        customer_cb.set(""); discount_entry.delete(0, tk.END); discount_entry.insert(0, "0")
-
-    # Aksiyon butonlarını şimdi oluştur (sağdan sola sırala)
-    complete_btn = tk.Button(actions_frame, text="✅ " + t('complete_sale').upper(), command=confirm_sale, bg="#10b981", fg="white",
-                             font=("Segoe UI", 10, "bold"), relief="flat", padx=18, pady=10,
-                             cursor="hand2", borderwidth=0, activebackground="#059669", activeforeground="white", width=18)
-    complete_btn.pack(side="right", padx=(6,4))
-    remove_btn = create_action_button(actions_frame, "❌ " + t('remove_selected'), remove_selected, "#ef4444")
-    add_btn = create_action_button(actions_frame, "➕ " + t('add_to_cart'), add_to_cart, "#10b981")
-
-    # Satışı Tamamla butonu artık actions_frame içinde
+            print_receipt(sales_list, fis_id=fis_id, customer_name=customer,
+                         kdv_rate=18.0, discount_rate=0.0, vat_included=False,
+                         language_code=CURRENT_LANGUAGE)
+        
+        # Sepeti temizle
+        for item in product_tree.get_children():
+            product_tree.delete(item)
+        customer_entry.delete(0, tk.END)
+        notes_entry.delete(0, tk.END)
+        phone_entry.delete(0, tk.END)
+        update_totals()
+        
+        messagebox.showinfo(t('success'), f"{t('receipt_no')} {fis_id}\n{t('customer')}: {customer}")
+    
+    # Hızlı ürün butonlarına fonksiyon bağla
+    for widget in quick_products_grid.winfo_children():
+        if isinstance(widget, tk.Frame):
+            for label in widget.winfo_children():
+                if isinstance(label, tk.Label) and "₺" not in label.cget("text"):
+                    pname = label.cget("text")
+                    widget.bind("<Button-1>", lambda e, p=pname: add_product_to_cart(p, 1))
+    
+    # Event bindings
+    barcode_entry.bind("<Return>", barcode_scan)
+    barcode_entry.bind("<FocusIn>", barcode_focus_in)
+    barcode_entry.bind("<FocusOut>", barcode_focus_out)
+    complete_sale_btn.config(command=complete_sale)
+    
+    # Klavye kısayolları
+    def keyboard_shortcuts(event):
+        """Klavye kısayollarını yönet"""
+        if event.keysym == "F7":
+            # F7: Fiyat Gör
+            show_price()
+        elif event.keysym == "F8":
+            # F8: Nakit ödeme
+            payment_var.set("NAKİT")
+            nakit_btn.config(bg="#1a7c34")
+            pos_btn.config(bg="#17a2b8")
+            open_acc_btn.config(bg="#fd7e14")
+            fragmented_btn.config(bg="#007bff")
+        elif event.keysym == "F9":
+            # F9: POS ödeme
+            payment_var.set("POS")
+            nakit_btn.config(bg="#28a745")
+            pos_btn.config(bg="#117a8b")
+            open_acc_btn.config(bg="#fd7e14")
+            fragmented_btn.config(bg="#007bff")
+        elif event.keysym == "F10":
+            # F10: Açık hesap
+            payment_var.set("AÇIK HESAP")
+            nakit_btn.config(bg="#28a745")
+            pos_btn.config(bg="#17a2b8")
+            open_acc_btn.config(bg="#d5620a")
+            fragmented_btn.config(bg="#007bff")
+    
+    main_container.bind_all("<F7>", keyboard_shortcuts)
+    main_container.bind_all("<F8>", keyboard_shortcuts)
+    main_container.bind_all("<F9>", keyboard_shortcuts)
+    main_container.bind_all("<F10>", keyboard_shortcuts)
+    
+    # İlk odak
+    barcode_entry.focus_set()
 
 def mount_cancel_sales(parent):
     for w in parent.winfo_children(): w.destroy()
@@ -1503,7 +3052,7 @@ def export_daily_report():
 # ==========================
 # Ana Pencere (tek pencere navigasyon)
 # ==========================
-def open_main_window(role):
+def open_main_window(role, username):
     main = tk.Toplevel()
     main.title(f"{t('app_title')} - {role.upper()}")
     set_theme(main)
@@ -1526,7 +3075,7 @@ def open_main_window(role):
             if CURRENT_LANGUAGE != code:
                 set_language(code)
                 main.destroy()
-                open_main_window(role)
+                open_main_window(role, username)
         
         is_active = (CURRENT_LANGUAGE == code)
         bg_color = ACCENT if is_active else "#2a2a35"
@@ -1557,6 +3106,142 @@ def open_main_window(role):
     create_lang_button_main("tr", "🇹🇷")
     create_lang_button_main("en", "🇬🇧")
     
+    # Profil butonu
+    def open_profile_window():
+        """Profil penceresi: İşletme bilgileri ve şifre değiştirme sekmeli görünümü"""
+        prof_win = tk.Toplevel(main)
+        prof_win.title(t('profile'))
+        set_theme(prof_win)
+        center_window(prof_win, 600, 550)
+        
+        # Üst başlık
+        ttk.Label(prof_win, text=f"👤 {t('profile')}", style="Header.TLabel").pack(pady=(16, 12))
+        
+        # Notebook (Sekmeli)
+        notebook = ttk.Notebook(prof_win)
+        notebook.pack(fill="both", expand=True, padx=20, pady=(0, 12))
+        
+        # === TAB 1: İşletme Bilgileri ===
+        business_tab = ttk.Frame(notebook, style="Card.TFrame")
+        notebook.add(business_tab, text=f"🏢 {t('business_info')}")
+        
+        biz_frame = ttk.Frame(business_tab, style="Card.TFrame")
+        biz_frame.pack(fill="both", expand=True, padx=24, pady=16)
+        
+        # Mevcut değerleri yükle
+        def get_setting(key, default=""):
+            cursor.execute("SELECT value FROM settings WHERE key=?", (key,))
+            r = cursor.fetchone()
+            return r[0] if r else default
+        
+        company_val = get_setting("company_name", "SmartPOS İşletme")
+        tax_office_val = get_setting("tax_office", "")
+        tax_num_val = get_setting("tax_number", "")
+        phone_val = get_setting("company_phone", "")
+        addr_val = get_setting("company_address", "")
+        footer_val = get_setting("receipt_footer", t('thank_you'))
+        
+        ttk.Label(biz_frame, text=t('company_name'), style="TLabel").grid(row=0, column=0, sticky="w", pady=8)
+        e_company = ttk.Entry(biz_frame, width=40)
+        e_company.insert(0, company_val)
+        e_company.grid(row=0, column=1, pady=8, padx=(8,0), sticky="ew")
+        
+        ttk.Label(biz_frame, text=t('tax_office'), style="TLabel").grid(row=1, column=0, sticky="w", pady=8)
+        e_tax_office = ttk.Entry(biz_frame, width=40)
+        e_tax_office.insert(0, tax_office_val)
+        e_tax_office.grid(row=1, column=1, pady=8, padx=(8,0), sticky="ew")
+        
+        ttk.Label(biz_frame, text=t('tax_number'), style="TLabel").grid(row=2, column=0, sticky="w", pady=8)
+        e_tax_num = ttk.Entry(biz_frame, width=40)
+        e_tax_num.insert(0, tax_num_val)
+        e_tax_num.grid(row=2, column=1, pady=8, padx=(8,0), sticky="ew")
+        
+        ttk.Label(biz_frame, text=t('phone'), style="TLabel").grid(row=3, column=0, sticky="w", pady=8)
+        e_phone = ttk.Entry(biz_frame, width=40)
+        e_phone.insert(0, phone_val)
+        e_phone.grid(row=3, column=1, pady=8, padx=(8,0), sticky="ew")
+        
+        ttk.Label(biz_frame, text=t('address'), style="TLabel").grid(row=4, column=0, sticky="w", pady=8)
+        e_address = ttk.Entry(biz_frame, width=40)
+        e_address.insert(0, addr_val)
+        e_address.grid(row=4, column=1, pady=8, padx=(8,0), sticky="ew")
+        
+        ttk.Label(biz_frame, text=t('receipt_footer'), style="TLabel").grid(row=5, column=0, sticky="w", pady=8)
+        e_footer = ttk.Entry(biz_frame, width=40)
+        e_footer.insert(0, footer_val)
+        e_footer.grid(row=5, column=1, pady=8, padx=(8,0), sticky="ew")
+        
+        biz_frame.columnconfigure(1, weight=1)
+        
+        def save_business_info():
+            cursor.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('company_name',?)", (e_company.get().strip(),))
+            cursor.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('tax_office',?)", (e_tax_office.get().strip(),))
+            cursor.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('tax_number',?)", (e_tax_num.get().strip(),))
+            cursor.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('company_phone',?)", (e_phone.get().strip(),))
+            cursor.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('company_address',?)", (e_address.get().strip(),))
+            cursor.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('receipt_footer',?)", (e_footer.get().strip(),))
+            conn.commit()
+            messagebox.showinfo(t('success'), t('profile_saved'))
+        
+        btn_save_biz = tk.Button(business_tab, text=f"💾 {t('save')}", command=save_business_info,
+                                 bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
+                                 relief="flat", padx=20, pady=10, cursor="hand2", borderwidth=0,
+                                 activebackground="#059669", activeforeground="white")
+        btn_save_biz.pack(pady=(6, 16))
+        
+        # === TAB 2: Şifre Değiştir ===
+        pw_tab = ttk.Frame(notebook, style="Card.TFrame")
+        notebook.add(pw_tab, text=f"🔒 {t('change_password')}")
+        
+        pw_frame = ttk.Frame(pw_tab, style="Card.TFrame")
+        pw_frame.pack(fill="both", expand=True, padx=24, pady=16)
+        
+        ttk.Label(pw_frame, text=t('current_password'), style="TLabel").grid(row=0, column=0, sticky="w", pady=8)
+        e_curr_pw = ttk.Entry(pw_frame, show="*", width=30)
+        e_curr_pw.grid(row=0, column=1, pady=8, padx=(8,0), sticky="ew")
+        
+        ttk.Label(pw_frame, text=t('new_password2'), style="TLabel").grid(row=1, column=0, sticky="w", pady=8)
+        e_new_pw = ttk.Entry(pw_frame, show="*", width=30)
+        e_new_pw.grid(row=1, column=1, pady=8, padx=(8,0), sticky="ew")
+        
+        ttk.Label(pw_frame, text=t('confirm_password'), style="TLabel").grid(row=2, column=0, sticky="w", pady=8)
+        e_confirm_pw = ttk.Entry(pw_frame, show="*", width=30)
+        e_confirm_pw.grid(row=2, column=1, pady=8, padx=(8,0), sticky="ew")
+        
+        pw_frame.columnconfigure(1, weight=1)
+        
+        def change_password():
+            curr = e_curr_pw.get().strip()
+            new_pw = e_new_pw.get().strip()
+            conf_pw = e_confirm_pw.get().strip()
+            if not curr or not new_pw or not conf_pw:
+                return messagebox.showwarning(t('warning'), t('enter_valid'))
+            # Mevcut şifre doğru mu?
+            cursor.execute("SELECT password FROM users WHERE username=?", (username,))
+            r = cursor.fetchone()
+            if not r or r[0] != curr:
+                return messagebox.showerror(t('error'), t('wrong_password'))
+            if new_pw != conf_pw:
+                return messagebox.showerror(t('error'), t('password_mismatch'))
+            cursor.execute("UPDATE users SET password=? WHERE username=?", (new_pw, username))
+            conn.commit()
+            messagebox.showinfo(t('success'), t('password_changed'))
+            e_curr_pw.delete(0, tk.END)
+            e_new_pw.delete(0, tk.END)
+            e_confirm_pw.delete(0, tk.END)
+        
+        btn_change_pw = tk.Button(pw_tab, text=f"🔑 {t('change_password')}", command=change_password,
+                                  bg="#8b5cf6", fg="white", font=("Segoe UI", 10, "bold"),
+                                  relief="flat", padx=20, pady=10, cursor="hand2", borderwidth=0,
+                                  activebackground="#7c3aed", activeforeground="white")
+        btn_change_pw.pack(pady=(6, 16))
+    
+    btn_profile = tk.Button(top_bar, text=f"👤 {t('profile')}", command=open_profile_window,
+                            bg="#8b5cf6", fg="white", font=("Segoe UI", 10),
+                            relief="flat", padx=12, pady=6, cursor="hand2", borderwidth=0,
+                            activebackground="#7c3aed", activeforeground="white")
+    btn_profile.pack(side="right", padx=6)
+    
     ttk.Button(top_bar, text=f"🚪 {t('logout')}", command=lambda: logout_action(main)).pack(side="right", padx=6)
 
     body = ttk.Frame(main); body.pack(fill="both", expand=True, padx=10, pady=10)
@@ -1566,8 +3251,17 @@ def open_main_window(role):
     menu_container.pack(side="left", fill="y", padx=(10,6), pady=10)
     menu_container.pack_propagate(False)
 
-    # Sabit başlık
-    ttk.Label(menu_container, text="📂 " + t('action_menu'), style="Header.TLabel").pack(pady=(12,6), fill="x")
+    # Sol menü daralt/genişlet durumu
+    menu_state = {"collapsed": False}
+
+    # Sabit başlık (ikon + başlık + daralt butonu)
+    header_bar = ttk.Frame(menu_container, style="Card.TFrame")
+    header_bar.pack(fill="x", padx=0, pady=(12,6))
+    header_label = ttk.Label(header_bar, text="📂 " + t('action_menu'), style="Header.TLabel")
+    header_label.pack(side="left", padx=(8,0))
+    collapse_btn = tk.Button(header_bar, text="◀", bg=CARD_COLOR, fg="white",
+                             relief="flat", padx=8, pady=4, cursor="hand2", borderwidth=0)
+    collapse_btn.pack(side="right", padx=(0,8))
     # ttk.Separator(menu_container, orient="horizontal").pack(fill="x", padx=10, pady=(0,6))  # kullanıcı isteğiyle kaldırıldı
 
     # Scroll alanı (başlığın altında kalsın)
@@ -1643,8 +3337,9 @@ def open_main_window(role):
     # Sağ Panel (dinamik)
     global right_panel
     right_panel = ttk.Frame(body, style="Card.TFrame"); right_panel.pack(side="right", fill="both", expand=True, padx=(0,10), pady=10)
-    ttk.Label(right_panel, text=t('menu_hint'), font=("Segoe UI", 12, "italic"),
-              background=CARD_COLOR, foreground=TEXT_GRAY).pack(expand=True)
+
+    # Üst menü butonlarını tutalım (ikon ve tam metin için)
+    top_buttons = []
 
     def mbtn(parent, text, cmd):
         b = tk.Button(parent, text=text, bg=CARD_COLOR, fg="white",
@@ -1652,6 +3347,12 @@ def open_main_window(role):
                       activeforeground="white", relief="flat", padx=10, pady=10,
                       anchor="w", borderwidth=0, command=cmd)
         b.pack(fill="x", pady=4, padx=14)
+        # Tam metni ve ikonunu sakla (ilk boşluğa kadar)
+        try:
+            icon = text.split(" ")[0]
+        except Exception:
+            icon = text
+        top_buttons.append({"btn": b, "full": text, "icon": icon})
         # Menü üzerindeyken tekerlekle kaydırma için hover ve wheel bağları
         try:
             b.bind("<Enter>", _focus_canvas)
@@ -1824,9 +3525,52 @@ def open_main_window(role):
         mbtn(menu, "🛑 " + t('cancel_sale'), lambda: mount_cancel_sales(right_panel))
         mbtn(menu, "🧾 " + t('receipts'), lambda: mount_receipts(right_panel))
 
+    # Menüyü daralt/genişlet
+    def apply_menu_collapse():
+        collapsed = menu_state["collapsed"]
+        if collapsed:
+            menu_container.config(width=64)
+            header_label.config(text="📂")
+            collapse_btn.config(text="▶")
+            # Alt bölümleri kapat
+            close_all_sections()
+            # Scrollbar'ı gizle (dar alanda yer kaplamasın)
+            try:
+                menu_scrollbar.pack_forget()
+            except Exception:
+                pass
+            for meta in top_buttons:
+                try:
+                    meta["btn"].config(text=meta["icon"], anchor="center", padx=0)
+                except Exception:
+                    pass
+        else:
+            menu_container.config(width=280)
+            header_label.config(text="📂 " + t('action_menu'))
+            collapse_btn.config(text="◀")
+            # Scrollbar'ı geri getir
+            try:
+                menu_scrollbar.pack(side="right", fill="y")
+            except Exception:
+                pass
+            for meta in top_buttons:
+                try:
+                    meta["btn"].config(text=meta["full"], anchor="w", padx=10)
+                except Exception:
+                    pass
+
+    def toggle_menu_collapse():
+        menu_state["collapsed"] = not menu_state["collapsed"]
+        apply_menu_collapse()
+
+    collapse_btn.config(command=toggle_menu_collapse)
+
     footer = ttk.Frame(main, style="Card.TFrame"); footer.pack(fill="x", padx=10, pady=(0,8))
     ttk.Label(footer, text=t('copyright'), style="Sub.TLabel").pack(side="left", padx=10)
     ttk.Label(footer, text=t('timestamp')+" "+datetime.now().strftime("%d.%m.%Y %H:%M"), style="Sub.TLabel").pack(side="right", padx=10)
+    
+    # Varsayılan olarak satış ekranını aç
+    mount_sales(right_panel)
 
 def logout_action(window):
     window.destroy()
@@ -1836,13 +3580,15 @@ def logout_action(window):
 # Login
 # ==========================
 def login_action():
+    global CURRENT_USER
     username = entry_username.get().strip()
     password = entry_password.get().strip()
     cursor.execute("SELECT role FROM users WHERE username=? AND password=?", (username,password))
     r = cursor.fetchone()
     if r:
         role = r[0]
-        open_main_window(role)
+        CURRENT_USER = username
+        open_main_window(role, username)
         login_window.withdraw()
     else:
         messagebox.showerror(t('error'), t('login_error'))

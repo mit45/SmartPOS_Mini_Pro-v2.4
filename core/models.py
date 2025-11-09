@@ -4,7 +4,7 @@ from typing import List
 @dataclass
 class SalesItem:
     product_name: str
-    quantity: int
+    quantity: float  # destek: adet ve kg (ondalık miktar)
     unit_net: float
     line_gross: float
 

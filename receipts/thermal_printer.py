@@ -62,7 +62,7 @@ def print_thermal_receipt(sales_list, fis_id="", customer_name="Müşteri", kdv_
         
         # Ürün başlıkları
         price_header = t('receipt_price') + (" (KDV Dahil)" if vat_included else " (KDV Hariç)")
-        p.text(f"{t('receipt_product'):<15} {t('receipt_quantity'):>4} {price_header[:8]:>8} {t('receipt_total'):>7}\n")
+        p.text(f"{t('receipt_product'):<15} {t('receipt_quantity'):>6} {price_header[:8]:>8} {t('receipt_total'):>7}\n")
         p.text("-" * 32 + "\n")
         
         # Ürünler
@@ -83,7 +83,8 @@ def print_thermal_receipt(sales_list, fis_id="", customer_name="Müşteri", kdv_
             subtotal_gross += line_total
 
             pname_short = str(pname)[:15]
-            p.text(f"{pname_short:<15} {int(q):>4} {disp_price:>8.2f} {line_total:>7.2f}\n")
+            qty_disp = (f"{q:.3f}" if abs(q - round(q)) > 1e-6 else f"{int(round(q))}")
+            p.text(f"{pname_short:<15} {qty_disp:>6} {disp_price:>8.2f} {line_total:>7.2f}\n")
         
         # Toplamlar: Brüt toplam - İndirim = Genel Toplam
         discount_amt = subtotal_gross * (float(discount_rate)/100.0)

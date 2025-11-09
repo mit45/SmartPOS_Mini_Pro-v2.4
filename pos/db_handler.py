@@ -33,9 +33,18 @@ def init_schema(conn, cursor):
       name TEXT UNIQUE,
       barcode TEXT,
       price REAL DEFAULT 0,
-      stock INTEGER DEFAULT 0,
+      stock REAL DEFAULT 0,
       buy_price REAL DEFAULT 0,
-      sale_price REAL
+      sale_price REAL,
+      unit TEXT DEFAULT 'adet'
+    )""")
+
+    # categories
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS categories(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      color TEXT
     )""")
 
     # sales
@@ -44,7 +53,7 @@ def init_schema(conn, cursor):
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       fis_id TEXT,
       product_name TEXT,
-      quantity INTEGER,
+      quantity REAL,
       price REAL,
       total REAL,
       payment_method TEXT DEFAULT 'cash',
@@ -103,9 +112,30 @@ def init_schema(conn, cursor):
             conn.commit()
         except Exception:
             pass
+    if "unit" not in prod_cols:
+        cursor.execute("ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'adet'")
+        conn.commit()
+    if "category_id" not in prod_cols:
+        cursor.execute("ALTER TABLE products ADD COLUMN category_id INTEGER")
+        conn.commit()
 
     # Seeds
     cursor.execute("INSERT OR IGNORE INTO users(username,password,role) VALUES (?,?,?)", ("admin","1234","admin"))
     cursor.execute("INSERT OR IGNORE INTO users(username,password,role) VALUES (?,?,?)", ("kasiyer","1234","cashier"))
     cursor.execute("INSERT OR IGNORE INTO users(username,password,role) VALUES (?,?,?)", ("cashier","1234","cashier"))
+    conn.commit()
+
+    # quick_products (fast buttons/cards)
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS quick_products(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          list_code TEXT NOT NULL,        -- 'main','list_1','list_2','list_3','list_4'
+          name TEXT NOT NULL,
+          price REAL NOT NULL DEFAULT 0,
+          sort_order INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now','localtime'))
+        )
+        """
+    )
     conn.commit()

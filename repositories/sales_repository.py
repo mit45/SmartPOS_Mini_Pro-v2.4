@@ -4,7 +4,7 @@ from typing import Optional, List, Tuple
 def insert_line(conn, cursor,
                 fis_id: str,
                 product_name: str,
-                quantity: int,
+                quantity: float,
                 price: float,
                 total: float,
                 payment_method: str = 'cash',
@@ -14,12 +14,12 @@ def insert_line(conn, cursor,
         INSERT INTO sales(fis_id,product_name,quantity,price,total,payment_method,canceled,created_at)
         VALUES(?,?,?,?,?,?,?,datetime('now','localtime'))
         """,
-        (fis_id, product_name, int(quantity), float(price), float(total), payment_method, int(canceled))
+    (fis_id, product_name, float(quantity), float(price), float(total), payment_method, int(canceled))
     )
     conn.commit()
 
 
-def get_sales_between(cursor, from_dt: str, to_dt: str) -> List[Tuple[str, str, str, int, float, float]]:
+def get_sales_between(cursor, from_dt: str, to_dt: str) -> List[Tuple[str, str, str, float, float, float]]:
     cursor.execute(
         """
           SELECT fis_id, created_at, product_name, quantity, price, total
@@ -32,7 +32,7 @@ def get_sales_between(cursor, from_dt: str, to_dt: str) -> List[Tuple[str, str, 
     )
     rows = cursor.fetchall()
     return [
-        (str(r[0]), str(r[1]), str(r[2]), int(r[3]), float(r[4]), float(r[5]))
+        (str(r[0]), str(r[1]), str(r[2]), float(r[3]), float(r[4]), float(r[5]))
         for r in rows
     ]
 

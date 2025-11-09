@@ -2,8 +2,8 @@
 from repositories import sales_repository as repo
 from services import product_service as product_svc
 
-def insert_sale_line(conn, cursor, fis_id: str, product_name: str, quantity: int, price: float, total: float, payment_method: str = 'cash') -> None:
-    repo.insert_line(conn, cursor, fis_id, product_name, quantity, price, total, payment_method=payment_method)
+def insert_sale_line(conn, cursor, fis_id: str, product_name: str, quantity: float, price: float, total: float, payment_method: str = 'cash') -> None:
+    repo.insert_line(conn, cursor, fis_id, product_name, float(quantity), price, total, payment_method=payment_method)
 
 def list_sales_between(cursor, from_dt: str, to_dt: str):
     return repo.get_sales_between(cursor, from_dt, to_dt)
@@ -20,7 +20,7 @@ def cancel_receipt(conn, cursor, fis_id: str) -> None:
     rows = cursor.fetchall()
     for name, qty in rows:
         try:
-            product_svc.increment_stock(conn, cursor, name, int(qty))
+            product_svc.increment_stock(conn, cursor, name, float(qty))
         except Exception:
             # even if a product is missing, try to proceed
             pass
