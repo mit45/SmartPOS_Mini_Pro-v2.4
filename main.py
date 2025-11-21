@@ -1521,12 +1521,35 @@ def mount_sales(parent):
         
         def on_select(e=None):
             sel = search_tree.selection()
+            # Eğer seçim yoksa ama liste doluysa (örn: Enter'a basıldı), ilkini seç
+            if not sel:
+                children = search_tree.get_children()
+                if children:
+                    sel = (children[0],)
+            
             if sel:
                 pname = search_tree.item(sel[0])["values"][0]
                 add_product_to_cart(pname, 1)
                 search_win.destroy()
         
+        def focus_tree(e):
+            """Arama kutusundan aşağı oka basınca listeye odaklan"""
+            children = search_tree.get_children()
+            if children:
+                search_tree.focus_set()
+                # İlk elemanı seçili hale getir
+                search_tree.selection_set(children[0])
+                search_tree.focus(children[0])
+                search_tree.see(children[0])
+                return "break"
+
         search_tree.bind("<Double-1>", on_select)
+        search_tree.bind("<Return>", on_select)
+        
+        # Arama kutusu eventleri
+        search_entry.bind("<Return>", on_select)
+        search_entry.bind("<Down>", focus_tree)
+        
         load_products(search_text)
         search_entry.focus_set()
     
@@ -1544,7 +1567,47 @@ def mount_sales(parent):
             messagebox.showerror(t('error'), t('product_not_found'))
     
     def reprint_last():
-        """Son fişi yeniden yazdır"""
+        """Son fişi yeniden yazdır veya sepet doluysa sepeti yazdır"""
+        # Sepet kontrolü
+        try:
+            items = product_tree.get_children()
+        except NameError:
+            items = []
+
+        if items:
+            # Sepet doluysa MEVCUT sepeti yazdır (Önizleme)
+            current_sales_list = []
+            for item in items:
+                vals = product_tree.item(item)["values"]
+                # vals: [DeleteBtn, Barcode, Name, Category, Qty, Price, Total]
+                pname = vals[2]
+                def num(v):
+                    try:
+                        return float(str(v).replace(".", ".").replace(",", "."))
+                    except:
+                        return 0.0
+                qty = num(vals[4])
+                price = num(vals[5])
+                line_total = num(vals[6])
+                current_sales_list.append((pname, qty, price, line_total))
+            
+            # Müşteri adı
+            cust_name = t('customer')
+            try:
+                if customer_entry.get().strip():
+                    cust_name = customer_entry.get().strip()
+            except:
+                pass
+
+            # Yazdır (Önizleme)
+            print_receipt(current_sales_list, fis_id="ONIZLEME", customer_name=cust_name,
+                         kdv_rate=18.0, discount_rate=0.0, vat_included=False,
+                         language_code=CURRENT_LANGUAGE)
+            
+            messagebox.showinfo(t('info'), "Sepetteki ürünler önizleme olarak yazdırıldı.\n(Satış henüz kaydedilmedi)")
+            return
+
+        # Sepet boşsa son fişi yazdır
         cursor.execute("SELECT fis_id FROM sales ORDER BY id DESC LIMIT 1")
         r = cursor.fetchone()
         if not r:
@@ -2218,11 +2281,15 @@ def mount_sales(parent):
     
     canvas.bind("<Configure>", resize_canvas)
     
-    # Mouse wheel scroll desteği
+    # Mouse wheel scroll desteği - Canvas geçerliyken
     def on_mousewheel(event):
-        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        try:
+            if canvas.winfo_exists():
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except Exception:
+            pass
     
-    canvas.bind_all("<MouseWheel>", on_mousewheel)
+    canvas.bind("<MouseWheel>", on_mousewheel)
     
     # Not: Hızlı ürünler artık veritabanından okunuyor (quick_products)
     
@@ -2787,7 +2854,7 @@ def mount_sales(parent):
         update_payment_display()
     
     def barcode_scan(event):
-        """Barkod okutulduğunda"""
+        """Barkod okutulduğunda veya Enter basıldığında"""
         barcode = barcode_entry.get().strip()
         if not barcode or "Okutunuz" in barcode:
             return
@@ -2799,6 +2866,9 @@ def mount_sales(parent):
             barcode_entry.delete(0, tk.END)
             barcode_entry.insert(0, "Ürün Barkodunu Okutunuz...")
             barcode_entry.config(fg="#999999")
+        else:
+            # Barkod bulunamazsa Ara penceresini aç
+            show_product_list()
     
     def barcode_focus_in(event):
         if "Okutunuz" in barcode_entry.get():
@@ -3056,6 +3126,14 @@ def open_main_window(role, username):
     main = tk.Toplevel()
     main.title(f"{t('app_title')} - {role.upper()}")
     set_theme(main)
+    
+    # Çıkış onayı (X tuşu)
+    def on_close():
+        if messagebox.askyesno(t('exit_title'), t('confirm_exit')):
+            main.destroy()
+            login_window.destroy() # Ana pencereyi de kapat (Uygulamadan çık)
+            
+    main.protocol("WM_DELETE_WINDOW", on_close)
     
     # Tam ekran yap
     main.state('zoomed')  # Windows için maximize
@@ -3573,8 +3651,9 @@ def open_main_window(role, username):
     mount_sales(right_panel)
 
 def logout_action(window):
-    window.destroy()
-    login_window.deiconify()
+    if messagebox.askyesno(t('exit_title'), t('confirm_logout')):
+        window.destroy()
+        login_window.deiconify()
 
 # ==========================
 # Login
@@ -3588,6 +3667,14 @@ def login_action():
     if r:
         role = r[0]
         CURRENT_USER = username
+        
+        # Son kullanıcıyı kaydet
+        try:
+            cursor.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('last_user', ?)", (username,))
+            conn.commit()
+        except Exception:
+            pass
+
         open_main_window(role, username)
         login_window.withdraw()
     else:
@@ -3667,6 +3754,15 @@ def start_login_screen():
               font=("Segoe UI", 11, "bold")).pack(pady=(20,6), anchor="w", padx=4)
     entry_username = ttk.Entry(frame, font=("Segoe UI", 11))
     entry_username.pack(pady=(0, 12), ipady=6, fill="x", padx=4)
+    
+    # Son kullanıcıyı yükle
+    try:
+        cursor.execute("SELECT value FROM settings WHERE key='last_user'")
+        last_user_row = cursor.fetchone()
+        if last_user_row:
+            entry_username.insert(0, last_user_row[0])
+    except Exception:
+        pass
 
     ttk.Label(frame, text=t('password'),
               font=("Segoe UI", 11, "bold")).pack(pady=(12,6), anchor="w", padx=4)

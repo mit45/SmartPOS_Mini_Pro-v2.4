@@ -21,6 +21,9 @@ LANGUAGES = {
         "show": "Göster",
         "hide": "Gizle",
         "logout": "Çıkış Yap",
+        "confirm_logout": "Çıkış yapmak istediğinize emin misiniz?",
+        "confirm_exit": "Uygulamadan çıkmak istediğinize emin misiniz?",
+        "exit_title": "Çıkış",
         "language": "Dil:",
         
         # Profil / İşletme
@@ -327,6 +330,9 @@ LANGUAGES = {
         "show": "Show",
         "hide": "Hide",
         "logout": "Logout",
+        "confirm_logout": "Are you sure you want to logout?",
+        "confirm_exit": "Are you sure you want to exit the application?",
+        "exit_title": "Exit",
         "language": "Language:",
         
         # Profile / Business
