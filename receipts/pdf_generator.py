@@ -240,5 +240,8 @@ def print_receipt(
                     subprocess.call(("open", filename))
             except Exception:
                 pass
+        
+        return filename
     except Exception as e:
         messagebox.showerror(t('error'), f"{t('print_error')}\n\n{e}")
+        return None

@@ -1530,6 +1530,18 @@ def mount_sales(parent):
             if sel:
                 pname = search_tree.item(sel[0])["values"][0]
                 add_product_to_cart(pname, 1)
+                
+                # Ana ekrandaki arama kutusunu temizle
+                try:
+                    barcode_entry.delete(0, tk.END)
+                    barcode_entry.insert(0, "Ürün Barkodunu Okutunuz...")
+                    barcode_entry.config(fg="#999999")
+                    # Odağı geri ver
+                    barcode_entry.focus_set()
+                    barcode_entry.icursor(0)
+                except:
+                    pass
+
                 search_win.destroy()
         
         def focus_tree(e):
@@ -1608,6 +1620,9 @@ def mount_sales(parent):
             return
 
         # Sepet boşsa son fişi yazdır
+        if not messagebox.askyesno(t('reprint'), "Sepet boş. Son kesilen fişi tekrar yazdırmak ister misiniz?"):
+            return
+
         cursor.execute("SELECT fis_id FROM sales ORDER BY id DESC LIMIT 1")
         r = cursor.fetchone()
         if not r:
@@ -2143,10 +2158,14 @@ def mount_sales(parent):
     
     payment_var = tk.StringVar(value="NAKİT")
     
+    def on_nakit_click():
+        payment_var.set("NAKİT")
+        complete_sale()
+
     nakit_btn = tk.Button(payment_methods_frame, text="💵 " + t('cash_register') + "\n(F8)",
                          font=("Segoe UI", 10, "bold"), bg="#28a745", fg="white",
                          relief="flat", padx=0, pady=14, cursor="hand2", borderwidth=0,
-                         activebackground="#218838", command=lambda: payment_var.set("NAKİT"))
+                         activebackground="#218838", command=on_nakit_click)
     nakit_btn.pack(side="left", fill="x", expand=True, padx=2)
     
     pos_btn = tk.Button(payment_methods_frame, text="💳 " + t('pos_payment') + "\n(F9)",
@@ -2880,8 +2899,108 @@ def mount_sales(parent):
             barcode_entry.insert(0, "Ürün Barkodunu Okutunuz...")
             barcode_entry.config(fg="#999999")
     
+    def show_sale_options_dialog(fis_id, sales_list, customer_name, total_amount, on_confirm):
+        dialog = tk.Toplevel()
+        dialog.title(t('print_receipt'))
+        set_theme(dialog)
+        center_window(dialog, 500, 450)
+        dialog.resizable(False, False)
+        try:
+            dialog.transient(parent.winfo_toplevel())
+            dialog.grab_set()
+        except:
+            pass
+        
+        # İçerik
+        content = tk.Frame(dialog, bg=BG_COLOR)
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        def show_result_ui(message, is_error=False):
+            for w in content.winfo_children(): w.destroy()
+            
+            icon = "❌" if is_error else "✅"
+            color = "#dc3545" if is_error else "#28a745"
+            
+            tk.Label(content, text=icon, font=("Segoe UI", 48), bg=BG_COLOR, fg=color).pack()
+            tk.Label(content, text=message, font=("Segoe UI", 11), 
+                     bg=BG_COLOR, fg="white", wraplength=450).pack(pady=(20, 20))
+            
+            tk.Button(content, text="Tamam", font=("Segoe UI", 10, "bold"), 
+                      bg="#6c757d", fg="white", relief="flat", padx=30, pady=10, cursor="hand2",
+                      activebackground="#5a6268", activeforeground="white", borderwidth=0,
+                      command=dialog.destroy).pack()
+
+        def process_action(mode):
+            # Butonları devre dışı bırak
+            try:
+                b1.config(state="disabled")
+                b2.config(state="disabled")
+                b3.config(state="disabled")
+                b4.config(state="disabled")
+            except:
+                pass
+            
+            # İşlemi gerçekleştir
+            try:
+                result_msg = on_confirm(mode)
+                show_result_ui(result_msg, is_error=False)
+            except Exception as e:
+                show_result_ui(f"Hata:\n{e}", is_error=True)
+
+        # İkon ve Başlık
+        tk.Label(content, text="❓", font=("Segoe UI", 48), bg=BG_COLOR, fg="#17a2b8").pack()
+        tk.Label(content, text=t('confirm'), font=("Segoe UI", 16, "bold"), 
+                 bg=BG_COLOR, fg="white").pack(pady=(10, 5))
+        
+        # Bilgi
+        info_frame = tk.Frame(content, bg=BG_COLOR)
+        info_frame.pack(pady=(0, 20))
+        
+        tk.Label(info_frame, text=f"{t('total')}: {total_amount:.2f} ₺", font=("Segoe UI", 12, "bold"), 
+                 bg=BG_COLOR, fg="#ffc107").pack(pady=5)
+        tk.Label(info_frame, text=f"{t('customer')}: {customer_name}", font=("Segoe UI", 10), 
+                 bg=BG_COLOR, fg=TEXT_GRAY).pack()
+        
+        # Butonlar Container
+        btn_container = tk.Frame(content, bg=BG_COLOR)
+        btn_container.pack(fill="x", pady=10)
+
+        # Üst Sıra (3 Buton)
+        top_row = tk.Frame(btn_container, bg=BG_COLOR)
+        top_row.pack(fill="x", pady=(0, 10))
+        
+        # Termal
+        b1 = tk.Button(top_row, text=f"🖨 {t('thermal_printer')}", font=("Segoe UI", 10, "bold"), 
+                  bg="#007bff", fg="white", relief="flat", padx=10, pady=12, cursor="hand2",
+                  activebackground="#0056b3", activeforeground="white", borderwidth=0,
+                  command=lambda: process_action('thermal'))
+        b1.pack(side="left", fill="x", expand=True, padx=5)
+        
+        # PDF
+        b2 = tk.Button(top_row, text="📄 PDF", font=("Segoe UI", 10, "bold"), 
+                  bg="#17a2b8", fg="white", relief="flat", padx=10, pady=12, cursor="hand2",
+                  activebackground="#138496", activeforeground="white", borderwidth=0,
+                  command=lambda: process_action('pdf'))
+        b2.pack(side="left", fill="x", expand=True, padx=5)
+        
+        # Kaydet (Yazdırma)
+        b3 = tk.Button(top_row, text=f"💾 {t('no_print')}", font=("Segoe UI", 10, "bold"), 
+                  bg="#6c757d", fg="white", relief="flat", padx=10, pady=12, cursor="hand2",
+                  activebackground="#5a6268", activeforeground="white", borderwidth=0,
+                  command=lambda: process_action('none'))
+        b3.pack(side="left", fill="x", expand=True, padx=5)
+
+        # Alt Sıra (İptal Butonu) - Tam genişlik
+        b4 = tk.Button(btn_container, text=f"❌ {t('cancel_sale')}", font=("Segoe UI", 10, "bold"), 
+                  bg="#dc3545", fg="white", relief="flat", padx=10, pady=12, cursor="hand2",
+                  activebackground="#c82333", activeforeground="white", borderwidth=0,
+                  command=dialog.destroy)
+        b4.pack(fill="x", padx=5)
+        
+        dialog.wait_window()
+
     def complete_sale():
-        """Satışı tamamla"""
+        """Satışı başlat ve onay iste"""
         items = product_tree.get_children()
         if not items:
             messagebox.showwarning(t('warning'), t('cart_empty'))
@@ -2890,61 +3009,70 @@ def mount_sales(parent):
         customer = customer_entry.get().strip() or t('customer')
         payment_method = payment_var.get()
         
-        fis_id = f"FIS-{datetime.now().strftime('%Y%m%d')}-{os.urandom(3).hex().upper()}"
-        sales_list = []
+        # Verileri hazırla
+        sales_data = []
+        total_amount = 0.0
         
         for item in items:
             vals = product_tree.item(item)["values"]
-            # Sütunlar: Sil, Barkod, Ürün adı, Kategori, Miktar, Fiyat, Tutar
             pname = vals[2]
-            # Virgül/nokta farklarına karşı korumalı dönüştürme
             def num(v):
-                try:
-                    return float(str(v).replace(".", ".").replace(",", "."))
-                except Exception:
-                    return 0.0
+                try: return float(str(v).replace(",", "."))
+                except: return 0.0
             qty = num(vals[4])
             price = num(vals[5])
             total = num(vals[6])
+            sales_data.append({'pname': pname, 'qty': qty, 'price': price, 'total': total})
+            total_amount += total
             
-            # Stoktan düş
-            product_svc.decrement_stock(conn, cursor, pname, qty)
-            # Satışı kaydet
-            sales_svc.insert_sale_line(conn, cursor, fis_id, pname, qty, price, total, payment_method=payment_method.lower())
-            sales_list.append((pname, qty, price, total))
+        fis_id = f"FIS-{datetime.now().strftime('%Y%m%d')}-{os.urandom(3).hex().upper()}"
         
-        conn.commit()
-        
-        # Fiş yazdır
-        print_choice = messagebox.askyesnocancel(
-            t('print_receipt'),
-            f"{t('receipt_created')}\n\n{t('print_options')}\n\n" +
-            f"Evet = {t('thermal_printer')}\n" +
-            f"Hayır = PDF\n" +
-            f"İptal = {t('no_print')}"
-        )
-        
-        if print_choice is True:
-            print_thermal_receipt(sales_list, fis_id=fis_id, customer_name=customer,
-                                  kdv_rate=18.0, discount_rate=0.0, vat_included=False,
-                                  language_code=CURRENT_LANGUAGE)
-            print_receipt(sales_list, fis_id=fis_id, customer_name=customer,
-                         kdv_rate=18.0, discount_rate=0.0, vat_included=False,
-                         open_after=False, show_message=False, language_code=CURRENT_LANGUAGE)
-        elif print_choice is False:
-            print_receipt(sales_list, fis_id=fis_id, customer_name=customer,
-                         kdv_rate=18.0, discount_rate=0.0, vat_included=False,
-                         language_code=CURRENT_LANGUAGE)
-        
-        # Sepeti temizle
-        for item in product_tree.get_children():
-            product_tree.delete(item)
-        customer_entry.delete(0, tk.END)
-        notes_entry.delete(0, tk.END)
-        phone_entry.delete(0, tk.END)
-        update_totals()
-        
-        messagebox.showinfo(t('success'), f"{t('receipt_no')} {fis_id}\n{t('customer')}: {customer}")
+        def on_confirm_sale(mode):
+            # 1. Veritabanı işlemleri
+            sales_list_for_print = []
+            for d in sales_data:
+                product_svc.decrement_stock(conn, cursor, d['pname'], d['qty'])
+                sales_svc.insert_sale_line(conn, cursor, fis_id, d['pname'], d['qty'], d['price'], d['total'], payment_method=payment_method.lower())
+                sales_list_for_print.append((d['pname'], d['qty'], d['price'], d['total']))
+            
+            conn.commit()
+            
+            # 2. UI Temizle
+            for item in product_tree.get_children():
+                product_tree.delete(item)
+            customer_entry.delete(0, tk.END)
+            notes_entry.delete(0, tk.END)
+            phone_entry.delete(0, tk.END)
+            update_totals()
+            
+            # 3. Yazdırma İşlemleri
+            msg = t('receipt_created') + f"\n{t('receipt_no')} {fis_id}"
+            
+            if mode == 'thermal':
+                try:
+                    print_thermal_receipt(sales_list_for_print, fis_id=fis_id, customer_name=customer,
+                                          kdv_rate=18.0, discount_rate=0.0, vat_included=False,
+                                          language_code=CURRENT_LANGUAGE)
+                    # PDF yedeği
+                    print_receipt(sales_list_for_print, fis_id=fis_id, customer_name=customer,
+                                 kdv_rate=18.0, discount_rate=0.0, vat_included=False,
+                                 open_after=False, show_message=False, language_code=CURRENT_LANGUAGE)
+                    msg += "\n\nFiş termal yazıcıya gönderildi."
+                except Exception as e:
+                    msg += f"\n\nYazdırma Hatası: {e}"
+                    
+            elif mode == 'pdf':
+                fname = print_receipt(sales_list_for_print, fis_id=fis_id, customer_name=customer,
+                                     kdv_rate=18.0, discount_rate=0.0, vat_included=False,
+                                     open_after=True, show_message=False, language_code=CURRENT_LANGUAGE)
+                if fname:
+                    msg += f"\n\nPDF Kaydedildi:\n{fname}"
+                else:
+                    msg += "\n\nPDF Kaydedilemedi!"
+            
+            return msg
+
+        show_sale_options_dialog(fis_id, sales_data, customer, total_amount, on_confirm_sale)
     
     # Hızlı ürün butonlarına fonksiyon bağla
     for widget in quick_products_grid.winfo_children():
@@ -2993,8 +3121,8 @@ def mount_sales(parent):
     main_container.bind_all("<F9>", keyboard_shortcuts)
     main_container.bind_all("<F10>", keyboard_shortcuts)
     
-    # İlk odak
-    barcode_entry.focus_set()
+    # İlk odak (Kaldırıldı - Kullanıcı isteği)
+    # barcode_entry.focus_set()
 
 def mount_cancel_sales(parent):
     for w in parent.winfo_children(): w.destroy()
@@ -3119,6 +3247,63 @@ def export_daily_report():
         else: subprocess.call(("open", filename))
     except: pass
 
+def show_custom_confirm_dialog(title, message, parent=None):
+    """Özel Evet/Hayır onay penceresi"""
+    result = {"value": False}
+    
+    dialog = tk.Toplevel(parent)
+    dialog.title(title)
+    set_theme(dialog)
+    center_window(dialog, 400, 280)
+    dialog.resizable(False, False)
+    
+    try:
+        if parent:
+            dialog.transient(parent)
+        dialog.grab_set()
+    except:
+        pass
+        
+    # İçerik
+    content = tk.Frame(dialog, bg=BG_COLOR)
+    content.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    # İkon
+    tk.Label(content, text="❓", font=("Segoe UI", 48), bg=BG_COLOR, fg="#17a2b8").pack(pady=(10, 10))
+    
+    # Mesaj
+    tk.Label(content, text=message, font=("Segoe UI", 11, "bold"), 
+             bg=BG_COLOR, fg="white", wraplength=350).pack(pady=(0, 20))
+    
+    # Butonlar
+    btn_frame = tk.Frame(content, bg=BG_COLOR)
+    btn_frame.pack(fill="x", pady=10)
+    
+    def on_yes():
+        result["value"] = True
+        dialog.destroy()
+        
+    def on_no():
+        result["value"] = False
+        dialog.destroy()
+        
+    # Evet
+    b1 = tk.Button(btn_frame, text=f"✅ {t('yes')}", font=("Segoe UI", 10, "bold"), 
+              bg="#28a745", fg="white", relief="flat", padx=20, pady=10, cursor="hand2",
+              activebackground="#218838", activeforeground="white", borderwidth=0,
+              command=on_yes)
+    b1.pack(side="left", fill="x", expand=True, padx=5)
+    
+    # Hayır
+    b2 = tk.Button(btn_frame, text=f"❌ {t('no')}", font=("Segoe UI", 10, "bold"), 
+              bg="#dc3545", fg="white", relief="flat", padx=20, pady=10, cursor="hand2",
+              activebackground="#c82333", activeforeground="white", borderwidth=0,
+              command=on_no)
+    b2.pack(side="left", fill="x", expand=True, padx=5)
+    
+    dialog.wait_window()
+    return result["value"]
+
 # ==========================
 # Ana Pencere (tek pencere navigasyon)
 # ==========================
@@ -3129,7 +3314,7 @@ def open_main_window(role, username):
     
     # Çıkış onayı (X tuşu)
     def on_close():
-        if messagebox.askyesno(t('exit_title'), t('confirm_exit')):
+        if show_custom_confirm_dialog(t('exit_title'), t('confirm_exit'), main):
             main.destroy()
             login_window.destroy() # Ana pencereyi de kapat (Uygulamadan çık)
             
@@ -3137,6 +3322,7 @@ def open_main_window(role, username):
     
     # Tam ekran yap
     main.state('zoomed')  # Windows için maximize
+    main.minsize(1200, 800) # Minimum pencere boyutu
     
     top_bar = ttk.Frame(main, style="Card.TFrame"); top_bar.pack(fill="x", padx=10, pady=(8,4))
     ttk.Label(top_bar, text=f"{t('app_title')} {APP_VERSION}", style="Header.TLabel").pack(side="left", padx=10)
@@ -3323,14 +3509,19 @@ def open_main_window(role, username):
     ttk.Button(top_bar, text=f"🚪 {t('logout')}", command=lambda: logout_action(main)).pack(side="right", padx=6)
 
     body = ttk.Frame(main); body.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    # Grid Layout Yapılandırması (Daha stabil görünüm için)
+    body.grid_columnconfigure(0, weight=0) # Menü (sabit)
+    body.grid_columnconfigure(1, weight=1) # İçerik (esnek)
+    body.grid_rowconfigure(0, weight=1)
 
     # Sol Menü (Scroll'lu)
     menu_container = ttk.Frame(body, style="Card.TFrame", width=280)
-    menu_container.pack(side="left", fill="y", padx=(10,6), pady=10)
+    menu_container.grid(row=0, column=0, sticky="ns", padx=(10,6), pady=10)
     menu_container.pack_propagate(False)
 
     # Sol menü daralt/genişlet durumu
-    menu_state = {"collapsed": False}
+    menu_state = {"collapsed": True}
 
     # Sabit başlık (ikon + başlık + daralt butonu)
     header_bar = ttk.Frame(menu_container, style="Card.TFrame")
@@ -3414,7 +3605,8 @@ def open_main_window(role, username):
 
     # Sağ Panel (dinamik)
     global right_panel
-    right_panel = ttk.Frame(body, style="Card.TFrame"); right_panel.pack(side="right", fill="both", expand=True, padx=(0,10), pady=10)
+    right_panel = ttk.Frame(body, style="Card.TFrame")
+    right_panel.grid(row=0, column=1, sticky="nsew", padx=(0,10), pady=10)
 
     # Üst menü butonlarını tutalım (ikon ve tam metin için)
     top_buttons = []
@@ -3607,7 +3799,9 @@ def open_main_window(role, username):
     def apply_menu_collapse():
         collapsed = menu_state["collapsed"]
         if collapsed:
-            menu_container.config(width=64)
+            w = 64
+            menu_container.config(width=w)
+            body.grid_columnconfigure(0, minsize=w) # Grid sütun genişliğini zorla
             header_label.config(text="📂")
             collapse_btn.config(text="▶")
             # Alt bölümleri kapat
@@ -3623,7 +3817,9 @@ def open_main_window(role, username):
                 except Exception:
                     pass
         else:
-            menu_container.config(width=280)
+            w = 280
+            menu_container.config(width=w)
+            body.grid_columnconfigure(0, minsize=w) # Grid sütun genişliğini zorla
             header_label.config(text="📂 " + t('action_menu'))
             collapse_btn.config(text="◀")
             # Scrollbar'ı geri getir
@@ -3642,6 +3838,9 @@ def open_main_window(role, username):
         apply_menu_collapse()
 
     collapse_btn.config(command=toggle_menu_collapse)
+    
+    # Başlangıçta menü durumunu uygula
+    apply_menu_collapse()
 
     footer = ttk.Frame(main, style="Card.TFrame"); footer.pack(fill="x", padx=10, pady=(0,8))
     ttk.Label(footer, text=t('copyright'), style="Sub.TLabel").pack(side="left", padx=10)
@@ -3651,7 +3850,7 @@ def open_main_window(role, username):
     mount_sales(right_panel)
 
 def logout_action(window):
-    if messagebox.askyesno(t('exit_title'), t('confirm_logout')):
+    if show_custom_confirm_dialog(t('exit_title'), t('confirm_logout'), window):
         window.destroy()
         login_window.deiconify()
 
@@ -3781,6 +3980,12 @@ def start_login_screen():
     def toggle_hover_out(e): btn_toggle_pw.config(bg="#3a3a45")
     btn_toggle_pw.bind("<Enter>", toggle_hover_in)
     btn_toggle_pw.bind("<Leave>", toggle_hover_out)
+
+    # Akıllı Odaklanma (Kullanıcı adı doluysa şifreye, boşsa kullanıcı adına odaklan)
+    if entry_username.get():
+        entry_password.focus_set()
+    else:
+        entry_username.focus_set()
 
     # Modern Login Butonu
     login_btn = tk.Button(frame, text="🔐 " + t('login'), command=login_action,

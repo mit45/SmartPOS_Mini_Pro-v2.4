@@ -314,6 +314,8 @@ LANGUAGES = {
         
         # Diğer
         "confirm_repeat": "Yinele işlemine devam edilsin mi?",
+        "yes": "Evet",
+        "no": "Hayır",
     },
     "en": {
         "app_title": "SmartPOS Mini Pro",
@@ -623,5 +625,7 @@ LANGUAGES = {
 
         # Other
         "confirm_repeat": "Do you want to continue the repeat operation?",
+        "yes": "Yes",
+        "no": "No",
     }
 }
