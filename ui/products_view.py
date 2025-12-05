@@ -23,11 +23,11 @@ def mount_products(parent, conn, cursor, t,
     right = ttk.Frame(body, style="Card.TFrame"); right.pack(side="left", fill="y", padx=(4,8), pady=8)
 
     # Liste kolonları: ID, Ad, Barkod, Satış Fiyatı, Stok, Birim, Alış Fiyatı, Kategori
-    cols = (t('id'), t('name'), t('barcode'), t('sale_price'), t('stock'), t('unit'), t('buy_price'), t('category'))
+    cols = (t('seq'), t('name'), t('barcode'), t('sale_price'), t('stock'), t('unit'), t('buy_price'), t('category'))
     tree = ttk.Treeview(left, columns=cols, show="headings")
     for c in cols:
         tree.heading(c, text=c)
-    tree.column(t('id'), width=60, anchor="center")
+    tree.column(t('seq'), width=60, anchor="center")
     tree.column(t('name'), anchor="w", width=160)
     tree.column(t('barcode'), anchor="w", width=100)
     tree.column(t('sale_price'), anchor="e", width=90)
@@ -102,11 +102,16 @@ def mount_products(parent, conn, cursor, t,
     btns = ttk.Frame(parent, style="Card.TFrame"); btns.pack(fill="x", padx=12, pady=(0,12))
 
     def load(filter_text: str = ""):
+        nonlocal row_id_map
+        row_id_map = {}
         for r in tree.get_children():
             tree.delete(r)
-        for pid, name, barcode, sale_price, stock, buy_price, unit, category in product_svc.list_products(cursor, filter_text):
+        
+        products = product_svc.list_products(cursor, filter_text)
+        for idx, (pid, name, barcode, sale_price, stock, buy_price, unit, category) in enumerate(products, 1):
             stock_disp = f"{int(stock)}" if str(unit).lower()=="adet" else f"{float(stock):.3f}"
-            tree.insert("", "end", values=(pid, name, barcode, f"{float(sale_price):.2f}", stock_disp, unit, f"{float(buy_price):.2f}", category))
+            item_iid = tree.insert("", "end", values=(idx, name, barcode, f"{float(sale_price):.2f}", stock_disp, unit, f"{float(buy_price):.2f}", category))
+            row_id_map[item_iid] = pid
 
     def clear_form():
         selected_id["value"] = 0
@@ -155,19 +160,29 @@ def mount_products(parent, conn, cursor, t,
                 pass
         return name, barcode, sale_price, stock, buy_price, u, cat_id
 
+    # ID eşleştirme haritası (Treeview Item ID -> Real DB ID)
+    row_id_map = {}
+
     def populate_from_selection(_evt=None):
         sel = tree.selection()
         if not sel:
             clear_form(); return
-        values = tree.item(sel[0])["values"]
+        
+        item_iid = sel[0]
+        real_pid = row_id_map.get(item_iid)
+        
+        values = tree.item(item_iid)["values"]
         if len(values) < 8:
             clear_form(); return
-        pid, name_cur, barcode_cur, sale_price_cur, stock_cur, unit_cur, buy_price_cur, category_cur = values
-        try:
-            pid_int = int(pid)
-        except Exception:
-            pid_int = 0
-        selected_id["value"] = pid_int
+        
+        # values[0] artık sıra no, real_pid'yi map'ten alıyoruz
+        _, name_cur, barcode_cur, sale_price_cur, stock_cur, unit_cur, buy_price_cur, category_cur = values
+        
+        if real_pid is None:
+            # Fallback (eğer map'te yoksa, ki olmalı)
+            real_pid = 0
+
+        selected_id["value"] = real_pid
         name_var.set(name_cur)
         barcode_var.set(barcode_cur)
         price_var.set(str(sale_price_cur))
@@ -214,9 +229,14 @@ def mount_products(parent, conn, cursor, t,
         sel = tree.selection()
         if not sel:
             return messagebox.showwarning(t('warning'), t('select_item'))
-        pid, _name = tree.item(sel[0])["values"][:2]
+        
+        item_iid = sel[0]
+        real_pid = row_id_map.get(item_iid)
+        if not real_pid:
+            return
+            
         try:
-            product_svc.delete_product(conn, cursor, int(pid))
+            product_svc.delete_product(conn, cursor, int(real_pid))
             load(search_var.get()); clear_form()
         except Exception as e:
             messagebox.showerror(t('error'), str(e))

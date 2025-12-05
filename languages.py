@@ -49,7 +49,7 @@ LANGUAGES = {
         "quick_products": "Hızlı Ürünler",
         "lists": "Listeler",
         "cash_register": "NAKİT",
-        "pos_payment": "POS",
+        "pos_payment": "KREDİ KARTI",
         "open_account": "AÇIK HESAP",
         "fragmented": "PARÇALI",
         "credit_card": "KREDİ KARTI",

@@ -26,6 +26,7 @@ APP_VERSION = "v2.4"
 # ==========================
 CURRENT_LANGUAGE = "tr"
 CURRENT_USER = ""
+PARTIAL_PAYMENT_DATA = {}
 
 def t(key: str) -> str:
     """Çeviri fonksiyonu - Translation function"""
@@ -169,72 +170,6 @@ def mount_placeholder(parent, icon, title_text, body_text):
 
 
 # Generic placeholder pages for new submenus
-def mount_barkod(parent):
-    for w in parent.winfo_children():
-        w.destroy()
-    # Header
-    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12, 8))
-    ttk.Label(header, text="🏷️ " + t('barcode_mgmt'), style="Header.TLabel").pack(side="left", padx=8)
-
-    # Body
-    body = ttk.Frame(parent, style="Card.TFrame"); body.pack(fill="both", expand=True, padx=12, pady=8)
-    body.grid_columnconfigure(1, weight=1)
-
-    from services import product_service as ps
-
-    ttk.Label(body, text=t('product')+":", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=8, pady=8, sticky="e")
-    products = ps.list_products(cursor)
-    product_names = [p[1] for p in products]
-    cb = ttk.Combobox(body, values=product_names, width=40, state="readonly", font=("Segoe UI", 10))
-    cb.grid(row=0, column=1, padx=8, pady=8, sticky="ew")
-
-    ttk.Label(body, text=t('current_barcode'), font=("Segoe UI", 10)).grid(row=1, column=0, padx=8, pady=6, sticky="e")
-    lbl_current = ttk.Label(body, text="-", font=("Segoe UI", 10, "bold"))
-    lbl_current.grid(row=1, column=1, padx=8, pady=6, sticky="w")
-
-    ttk.Label(body, text=t('new_barcode'), font=("Segoe UI", 10, "bold")).grid(row=2, column=0, padx=8, pady=6, sticky="e")
-    e_new = ttk.Entry(body, width=30, font=("Segoe UI", 10)); e_new.grid(row=2, column=1, padx=8, pady=6, sticky="w")
-
-    def refresh():
-        name = cb.get()
-        if not name:
-            lbl_current.config(text="-"); return
-        rows = ps.list_products(cursor, name)
-        # find exact match
-        row = next((r for r in rows if r[1]==name), None)
-        if row:
-            _, _name, barcode, _sale, _stock, _buy, _unit, _cat = row
-            lbl_current.config(text=str(barcode or "-"))
-            e_new.delete(0, tk.END)
-            e_new.insert(0, str(barcode or ""))
-
-    cb.bind("<<ComboboxSelected>>", lambda *_: refresh())
-
-    btns = ttk.Frame(body, style="Card.TFrame"); btns.grid(row=3, column=0, columnspan=2, sticky="w", padx=8, pady=(10,4))
-    def save_barcode():
-        name = cb.get().strip()
-        if not name:
-            return messagebox.showwarning(t('warning'), t('select_item'))
-        # find product entry
-        rows = ps.list_products(cursor, name)
-        row = next((r for r in rows if r[1]==name), None)
-        if not row:
-            return messagebox.showerror(t('error'), t('product_not_found'))
-        pid, _name, _barcode, sale_price, stock, buy_price, unit, _cat = row
-        try:
-            ps.update_product(conn, cursor, pid, _name, e_new.get().strip(), float(sale_price), float(stock), float(buy_price), unit=unit)
-            messagebox.showinfo(t('success'), t('updated'))
-            refresh()
-        except Exception as e:
-            messagebox.showerror(t('error'), str(e))
-
-    tk.Button(btns, text="💾 "+t('save'), command=save_barcode,
-              bg="#10b981", fg="white", font=("Segoe UI", 9, "bold"),
-              activebackground="#059669", relief="flat", padx=14, pady=8, borderwidth=0).pack(side="left", padx=4)
-
-    if product_names:
-        cb.set(product_names[0]); refresh()
-
 def mount_kategori(parent):
     """Kategori Yönetimi"""
     for w in parent.winfo_children():
@@ -261,7 +196,10 @@ def mount_kategori(parent):
     tree.column(t('product_count'), width=120, anchor="center")
     tree.pack(fill="both", expand=True, padx=0, pady=0)
 
+    row_id_map = {}
+
     def load_categories():
+        row_id_map.clear()
         for item in tree.get_children():
             tree.delete(item)
         from repositories import category_repository
@@ -269,9 +207,10 @@ def mount_kategori(parent):
         if not categories:
             # Boş mesajı
             tree.insert("", "end", values=("", t('no_categories'), "", ""))
-        for cid, cname, color in categories:
+        for i, (cid, cname, color) in enumerate(categories, 1):
+            row_id_map[i] = cid
             cnt = category_repository.count_products(cursor, cid)
-            tree.insert("", "end", values=(cid, cname, color or "-", cnt))
+            tree.insert("", "end", values=(i, cname, color or "-", cnt))
 
     # Action buttons
     btn_frame = ttk.Frame(parent, style="Card.TFrame")
@@ -318,7 +257,13 @@ def mount_kategori(parent):
         vals = tree.item(sel[0])['values']
         if not vals or not vals[0]:
             return
-        cid = int(vals[0])
+        
+        try:
+            display_id = int(vals[0])
+            cid = row_id_map.get(display_id)
+            if not cid: return
+        except: return
+
         cname = str(vals[1])
         color = str(vals[2]) if vals[2] != "-" else ""
 
@@ -363,7 +308,13 @@ def mount_kategori(parent):
         vals = tree.item(sel[0])['values']
         if not vals or not vals[0]:
             return
-        cid = int(vals[0])
+        
+        try:
+            display_id = int(vals[0])
+            cid = row_id_map.get(display_id)
+            if not cid: return
+        except: return
+
         cname = str(vals[1])
         cnt = int(vals[3]) if vals[3] else 0
         if cnt > 0:
@@ -950,10 +901,10 @@ def mount_reports(parent):
         if not rows: return messagebox.showinfo(t('info'), t('no_sales_in_range'))
         os.makedirs("reports", exist_ok=True)
         fname = os.path.join("reports", f"rapor_{frm}_to_{to}.csv")
-        with open(fname, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
+        with open(fname, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f, delimiter=';')
             w.writerow([t('receipt_no'), t('date'), t('product'), t('quantity'), t('price'), t('total')])
-            for r in rows: w.writerow([r[0],r[1],r[2],r[3],f"{float(r[4]):.2f}",f"{float(r[5]):.2f}"])
+            for r in rows: w.writerow([r[0],r[1],r[2],r[3],f"{float(r[4]):.2f}".replace('.', ','),f"{float(r[5]):.2f}".replace('.', ',')])
         messagebox.showinfo(t('success'), f"{t('report_saved')}\n{fname}")
         try:
             if os.name=="nt": os.startfile(fname)  # type: ignore
@@ -2158,9 +2109,43 @@ def mount_sales(parent):
     
     payment_var = tk.StringVar(value="NAKİT")
     
+    def update_payment_visuals():
+        method = payment_var.get()
+        try:
+            nakit_btn.config(bg="#1a7c34" if method == "NAKİT" else "#28a745")
+            pos_btn.config(bg="#117a8b" if method == "credit_card" else "#17a2b8")
+            open_acc_btn.config(bg="#d5620a" if method == "AÇIK HESAP" else "#fd7e14")
+            fragmented_btn.config(bg="#0056b3" if method == "PARÇALI" else "#007bff")
+        except: pass
+
     def on_nakit_click():
         payment_var.set("NAKİT")
+        update_payment_visuals()
         complete_sale()
+
+    def on_pos_click():
+        payment_var.set("credit_card")
+        update_payment_visuals()
+        complete_sale()
+
+    def on_open_acc_click():
+        payment_var.set("AÇIK HESAP")
+        update_payment_visuals()
+        complete_sale()
+
+    def on_fragmented_click():
+        items = product_tree.get_children()
+        if not items:
+            messagebox.showwarning(t('warning'), t('cart_empty'))
+            return
+        
+        total_amount = 0.0
+        for item in items:
+            vals = product_tree.item(item)["values"]
+            try: total_amount += float(str(vals[6]).replace(",", "."))
+            except: pass
+            
+        show_partial_payment_dialog(total_amount)
 
     nakit_btn = tk.Button(payment_methods_frame, text="💵 " + t('cash_register') + "\n(F8)",
                          font=("Segoe UI", 10, "bold"), bg="#28a745", fg="white",
@@ -2171,19 +2156,19 @@ def mount_sales(parent):
     pos_btn = tk.Button(payment_methods_frame, text="💳 " + t('pos_payment') + "\n(F9)",
                        font=("Segoe UI", 10, "bold"), bg="#17a2b8", fg="white",
                        relief="flat", padx=0, pady=14, cursor="hand2", borderwidth=0,
-                       activebackground="#138496", command=lambda: payment_var.set("POS"))
+                       activebackground="#138496", command=on_pos_click)
     pos_btn.pack(side="left", fill="x", expand=True, padx=2)
     
     open_acc_btn = tk.Button(payment_methods_frame, text="📋 " + t('open_account') + "\n(F10)",
                             font=("Segoe UI", 10, "bold"), bg="#fd7e14", fg="white",
                             relief="flat", padx=0, pady=14, cursor="hand2", borderwidth=0,
-                            activebackground="#e96d0b", command=lambda: payment_var.set("AÇIK HESAP"))
+                            activebackground="#e96d0b", command=on_open_acc_click)
     open_acc_btn.pack(side="left", fill="x", expand=True, padx=2)
     
     fragmented_btn = tk.Button(payment_methods_frame, text="🔀 " + t('fragmented'),
                               font=("Segoe UI", 10, "bold"), bg="#007bff", fg="white",
                               relief="flat", padx=0, pady=14, cursor="hand2", borderwidth=0,
-                              activebackground="#0056b3", command=lambda: payment_var.set("PARÇALI"))
+                              activebackground="#0056b3", command=on_fragmented_click)
     fragmented_btn.pack(side="left", fill="x", expand=True, padx=2)
     
     # HIZLI ÜRÜNLER: Ödeme butonlarının altında (orta panelde)
@@ -2659,6 +2644,7 @@ def mount_sales(parent):
     customer_popup_win = None   # Toplevel
     customer_popup_list = None  # Listbox
     current_results = []        # filtrelenmiş satırlar
+    selected_customer_id = tk.IntVar(value=0) # Seçilen cari ID
 
     def hide_customer_popup():
         nonlocal customer_popup_win, customer_popup_list, current_results
@@ -2676,6 +2662,7 @@ def mount_sales(parent):
         if index < 0 or index >= len(current_results):
             hide_customer_popup(); return
         _cid, name, phone, _bal = current_results[index]
+        selected_customer_id.set(_cid)
         customer_entry.delete(0, tk.END); customer_entry.insert(0, str(name))
         phone_entry.delete(0, tk.END); phone_entry.insert(0, str(phone or ""))
         hide_customer_popup()
@@ -2999,6 +2986,112 @@ def mount_sales(parent):
         
         dialog.wait_window()
 
+    def show_partial_payment_dialog(total_amount):
+        dialog = tk.Toplevel(parent)
+        dialog.title("PARÇALI ÖDEME AL")
+        dialog.geometry("600x400")
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(parent)
+        dialog.grab_set()
+        
+        # Center dialog
+        dialog.update_idletasks()
+        width = dialog.winfo_width()
+        height = dialog.winfo_height()
+        x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+        y = (dialog.winfo_screenheight() // 2) - (height // 2)
+        dialog.geometry(f'+{x}+{y}')
+
+        # Header
+        header = tk.Frame(dialog, bg="#007bff", height=50)
+        header.pack(fill="x")
+        tk.Label(header, text="PARÇALI ÖDEME AL", font=("Segoe UI", 14, "bold"), bg="#007bff", fg="white").pack(pady=10)
+
+        # Description
+        desc = "Parçalı ödeme almak için aşağıdaki formu doldurunuz. Parçalı ödeme \"Açık Hesap\" kaydedilmektedir. Kalan tutar müşteri hesabına borç olarak yazılacaktır."
+        tk.Label(dialog, text=desc, font=("Segoe UI", 10), bg=BG_COLOR, fg="white", wraplength=550, justify="left").pack(pady=10, padx=20)
+
+        form_frame = tk.Frame(dialog, bg=BG_COLOR)
+        form_frame.pack(pady=10)
+
+        # Styles
+        lbl_style = {"font": ("Segoe UI", 14, "bold"), "bg": BG_COLOR, "fg": "white", "anchor": "e"}
+        entry_font = ("Segoe UI", 14)
+
+        # TOTAL
+        tk.Label(form_frame, text="TOPLAM :", **lbl_style).grid(row=0, column=0, padx=10, pady=5, sticky="e")
+        lbl_total = tk.Label(form_frame, text=f"{total_amount:.2f}", font=("Segoe UI", 14, "bold"), bg="#dfe6e9", fg="black", width=15, anchor="w")
+        lbl_total.grid(row=0, column=1, padx=10, pady=5)
+
+        # CASH
+        tk.Label(form_frame, text="NAKİT :", **lbl_style).grid(row=1, column=0, padx=10, pady=5, sticky="e")
+        sv_cash = tk.StringVar()
+        entry_cash = tk.Entry(form_frame, textvariable=sv_cash, font=entry_font, width=15)
+        entry_cash.grid(row=1, column=1, padx=10, pady=5)
+
+        # POS
+        tk.Label(form_frame, text="POS :", **lbl_style).grid(row=2, column=0, padx=10, pady=5, sticky="e")
+        sv_pos = tk.StringVar()
+        entry_pos = tk.Entry(form_frame, textvariable=sv_pos, font=entry_font, width=15)
+        entry_pos.grid(row=2, column=1, padx=10, pady=5)
+
+        # REMAINING
+        tk.Label(form_frame, text="KALAN :", **lbl_style).grid(row=3, column=0, padx=10, pady=5, sticky="e")
+        lbl_remaining = tk.Label(form_frame, text=f"{total_amount:.2f}", font=("Segoe UI", 14, "bold"), bg="#dfe6e9", fg="black", width=15, anchor="w")
+        lbl_remaining.grid(row=3, column=1, padx=10, pady=5)
+
+        def update_remaining(*args):
+            try:
+                cash = float(sv_cash.get().replace(",", ".") or 0)
+            except: cash = 0.0
+            try:
+                pos = float(sv_pos.get().replace(",", ".") or 0)
+            except: pos = 0.0
+            
+            remaining = total_amount - (cash + pos)
+            lbl_remaining.config(text=f"{remaining:.2f}")
+
+        sv_cash.trace("w", update_remaining)
+        sv_pos.trace("w", update_remaining)
+
+        # Buttons
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.pack(side="bottom", fill="x", pady=20, padx=20)
+
+        def do_sale():
+            try:
+                cash = float(sv_cash.get().replace(",", ".") or 0)
+            except: cash = 0.0
+            try:
+                pos = float(sv_pos.get().replace(",", ".") or 0)
+            except: pos = 0.0
+            
+            remaining = total_amount - (cash + pos)
+            
+            if remaining < -0.01: # Allow small float error
+                messagebox.showwarning("Hata", "Ödenen tutar toplam tutardan fazla olamaz!", parent=dialog)
+                return
+
+            # Store data
+            global PARTIAL_PAYMENT_DATA
+            PARTIAL_PAYMENT_DATA = {
+                "total": total_amount,
+                "cash": cash,
+                "pos": pos,
+                "remaining": remaining
+            }
+            
+            payment_var.set("PARÇALI")
+            update_payment_visuals()
+            dialog.destroy()
+            complete_sale()
+
+        tk.Button(btn_frame, text="Kapat", font=("Segoe UI", 10), bg="#007bff", fg="white", command=dialog.destroy, width=10).pack(side="right", padx=5)
+        tk.Button(btn_frame, text="Satış Yap", font=("Segoe UI", 10), bg="#28a745", fg="white", command=do_sale, width=10).pack(side="right", padx=5)
+
+        entry_cash.focus_set()
+        dialog.wait_window()
+
     def complete_sale():
         """Satışı başlat ve onay iste"""
         items = product_tree.get_children()
@@ -3029,18 +3122,78 @@ def mount_sales(parent):
         
         def on_confirm_sale(mode):
             # 1. Veritabanı işlemleri
+            # Ödeme yöntemini standartlaştır
+            pm_map = {
+                "NAKİT": "cash",
+                "credit_card": "credit_card",
+                "AÇIK HESAP": "open_account",
+                "PARÇALI": "fragmented"
+            }
+            final_pm = pm_map.get(payment_method, "cash")
+
             sales_list_for_print = []
             for d in sales_data:
                 product_svc.decrement_stock(conn, cursor, d['pname'], d['qty'])
-                sales_svc.insert_sale_line(conn, cursor, fis_id, d['pname'], d['qty'], d['price'], d['total'], payment_method=payment_method.lower())
+                sales_svc.insert_sale_line(conn, cursor, fis_id, d['pname'], d['qty'], d['price'], d['total'], payment_method=final_pm)
                 sales_list_for_print.append((d['pname'], d['qty'], d['price'], d['total']))
             
+            # AÇIK HESAP İŞLEMİ
+            if payment_method == "AÇIK HESAP":
+                try:
+                    from services import cari_service as cs
+                    cid = selected_customer_id.get()
+                    # Eğer listeden seçilmediyse isme göre bulmaya çalış
+                    if cid == 0 and customer and customer != t('customer'):
+                        found = cs.get_by_name(cursor, customer)
+                        if found:
+                            cid = found[0]
+                    
+                    if cid > 0:
+                        cs.add_borc(conn, cursor, cid, total_amount, f"Satış Fişi: {fis_id}")
+                    else:
+                        # Müşteri seçilmediyse uyarı verilebilir ama işlem devam ediyor
+                        # İstenirse burada return ile işlem durdurulabilir
+                        pass
+                except Exception as e:
+                    print(f"Açık hesap hatası: {e}")
+
+            # PARÇALI ÖDEME İŞLEMİ
+            if payment_method == "PARÇALI":
+                try:
+                    from services import cari_service as cs
+                    remaining = PARTIAL_PAYMENT_DATA.get("remaining", 0.0)
+                    
+                    if remaining > 0.01:
+                        cid = selected_customer_id.get()
+                        if cid == 0 and customer and customer != t('customer'):
+                            found = cs.get_by_name(cursor, customer)
+                            if found:
+                                cid = found[0]
+                        
+                        if cid > 0:
+                            cs.add_borc(conn, cursor, cid, remaining, f"Satış Fişi (Parçalı): {fis_id}")
+                except Exception as e:
+                    print(f"Parçalı ödeme hatası: {e}")
+
             conn.commit()
             
             # 2. UI Temizle
             for item in product_tree.get_children():
                 product_tree.delete(item)
+            
+            # Frame'leri temizle (Adet ve Fiyat girişleri)
+            for f in list(qty_frames.values()): 
+                try: f.destroy()
+                except: pass
+            qty_frames.clear()
+            
+            for f in list(price_frames.values()): 
+                try: f.destroy()
+                except: pass
+            price_frames.clear()
+
             customer_entry.delete(0, tk.END)
+            selected_customer_id.set(0) # ID sıfırla
             notes_entry.delete(0, tk.END)
             phone_entry.delete(0, tk.END)
             update_totals()
@@ -3097,24 +3250,18 @@ def mount_sales(parent):
         elif event.keysym == "F8":
             # F8: Nakit ödeme
             payment_var.set("NAKİT")
-            nakit_btn.config(bg="#1a7c34")
-            pos_btn.config(bg="#17a2b8")
-            open_acc_btn.config(bg="#fd7e14")
-            fragmented_btn.config(bg="#007bff")
+            update_payment_visuals()
+            complete_sale()
         elif event.keysym == "F9":
             # F9: POS ödeme
-            payment_var.set("POS")
-            nakit_btn.config(bg="#28a745")
-            pos_btn.config(bg="#117a8b")
-            open_acc_btn.config(bg="#fd7e14")
-            fragmented_btn.config(bg="#007bff")
+            payment_var.set("credit_card")
+            update_payment_visuals()
+            complete_sale()
         elif event.keysym == "F10":
             # F10: Açık hesap
             payment_var.set("AÇIK HESAP")
-            nakit_btn.config(bg="#28a745")
-            pos_btn.config(bg="#17a2b8")
-            open_acc_btn.config(bg="#d5620a")
-            fragmented_btn.config(bg="#007bff")
+            update_payment_visuals()
+            complete_sale()
     
     main_container.bind_all("<F7>", keyboard_shortcuts)
     main_container.bind_all("<F8>", keyboard_shortcuts)
@@ -3166,7 +3313,18 @@ def mount_cancel_sales(parent):
         for fis_id, ts, sum_total, pay in sales_svc.list_recent_receipts(cursor, 200):
             ts_disp = (ts or "").replace("T"," ")
             # Ödeme yöntemi ikonlu
-            pay_display = ("💵 " + t('cash')) if pay == 'cash' else ("💳 " + t('credit_card'))
+            if pay == 'cash' or pay == 'nakit':
+                pay_display = "💵 " + t('cash')
+            elif pay == 'credit_card':
+                pay_display = "💳 " + t('credit_card')
+            elif pay == 'open_account':
+                pay_display = "📋 " + t('open_account')
+            elif pay == 'fragmented':
+                pay_display = "🔀 " + t('fragmented')
+            else:
+                # Bilinmeyen veya eski kayıtlar için varsayılan
+                pay_display = "💳 " + t('credit_card') if pay != 'cash' else "💵 " + t('cash')
+            
             tree.insert("", "end", values=(fis_id, ts_disp, f"{float(sum_total):.2f} ₺", pay_display))
 
     def cancel_selected():
@@ -3238,9 +3396,10 @@ def export_daily_report():
     """)
     rows = cursor.fetchall()
     if not rows: return messagebox.showinfo(t('info'), t('no_sales_today'))
-    with open(filename, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f); w.writerow([t('csv_receipt_no'), t('csv_product'), t('csv_qty'), t('csv_price'), t('csv_total'), t('csv_date')])
-        for r in rows: w.writerow([r[0],r[1],r[2],f"{float(r[3]):.2f}",f"{float(r[4]):.2f}",r[5]])
+    with open(filename, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f, delimiter=';')
+        w.writerow([t('csv_receipt_no'), t('csv_product'), t('csv_qty'), t('csv_price'), t('csv_total'), t('csv_date')])
+        for r in rows: w.writerow([r[0],r[1],r[2],f"{float(r[3]):.2f}".replace('.', ','),f"{float(r[4]):.2f}".replace('.', ','),r[5]])
     messagebox.showinfo(t('success'), f"{t('daily_report_saved')}\n{filename}")
     try:
         if os.name=="nt": os.startfile(filename)  # type: ignore
@@ -3661,7 +3820,6 @@ def open_main_window(role, username):
         products_header.config(command=toggle_products)
         register_section(products_header, products_sub, products_visible)
         msub(products_sub, t('product_list'), lambda: mount_products(right_panel))
-        msub(products_sub, t('barcode_mgmt'), lambda: mount_barkod(right_panel))
         msub(products_sub, t('category_mgmt'), lambda: mount_kategori(right_panel))
 
         # Stok Yönetimi
