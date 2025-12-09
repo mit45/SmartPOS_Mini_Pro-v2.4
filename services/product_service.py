@@ -49,6 +49,12 @@ def get_price_stock_by_name(cursor, name: str) -> Optional[Tuple[float, float, s
 def get_by_barcode(cursor, barcode: str) -> Optional[Tuple[int, str, float, float, str]]:
     return repo.get_by_barcode(cursor, barcode)
 
+def get_by_id(cursor, pid: int):
+    return repo.get_by_id(cursor, pid)
+
+def decrement_stock(conn, cursor, name: str, qty: float) -> None:
+    repo.decrement_stock(conn, cursor, name, qty)
+
 
 def decrement_stock(conn, cursor, name: str, qty: float) -> None:
     repo.decrement_stock(conn, cursor, name, float(qty))

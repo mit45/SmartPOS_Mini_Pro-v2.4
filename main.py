@@ -5,6 +5,8 @@ from datetime import datetime, date
 from languages import LANGUAGES
 from pos.db_handler import get_connection, init_schema
 from services import product_service as product_svc
+from services import expense_service as expense_svc
+from services import purchase_service as purchase_svc
 from receipts import print_receipt, print_thermal_receipt
 
 # ==========================
@@ -141,22 +143,503 @@ def mount_products(parent):
     from ui.products_view import mount_products as _mount_products_view
     return _mount_products_view(parent, conn, cursor, t, FG_COLOR, BG_COLOR, CARD_COLOR, ACCENT)
 
-def mount_irsaliye(parent):
-    for w in parent.winfo_children():
-        w.destroy()
-    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12, 8))
-    ttk.Label(header, text="📥 " + t('dispatch_entry'), style="Header.TLabel").pack(side="left", padx=8)
-    body = ttk.Frame(parent, style="Card.TFrame"); body.pack(fill="both", expand=True, padx=12, pady=8)
-    ttk.Label(body, text=t('dispatch_entry_coming'), font=("Segoe UI", 12), background=CARD_COLOR).pack(expand=True, padx=16, pady=16)
+def _mount_purchase_screen(parent, doc_type):
+    # doc_type: 'irsaliye' or 'fatura'
+    title_key = 'dispatch_entry' if doc_type == 'irsaliye' else 'invoice_entry'
+    icon = "📥" if doc_type == 'irsaliye' else "🧾"
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text=f"{icon} {t(title_key)}", style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Üst: Belge Bilgileri
+    info_frame = ttk.Frame(content, style="Card.TFrame"); info_frame.pack(fill="x", pady=(0,10))
+    
+    # Tedarikçi Seçimi
+    ttk.Label(info_frame, text=t('supplier_list')).grid(row=0, column=0, padx=10, pady=10)
+    from services import cari_service as cs
+    suppliers = [c for c in cs.list_all(cursor) if c[5] == 'alacakli']
+    supplier_names = [s[1] for s in suppliers]
+    cb_supplier = ttk.Combobox(info_frame, values=supplier_names, width=30)
+    cb_supplier.grid(row=0, column=1, padx=10, pady=10)
+    
+    ttk.Label(info_frame, text="Belge No:").grid(row=0, column=2, padx=10, pady=10)
+    e_doc_no = ttk.Entry(info_frame); e_doc_no.grid(row=0, column=3, padx=10, pady=10)
+    
+    ttk.Label(info_frame, text=t('date')).grid(row=0, column=4, padx=10, pady=10)
+    e_date = ttk.Entry(info_frame); e_date.insert(0, datetime.now().strftime("%Y-%m-%d"))
+    e_date.grid(row=0, column=5, padx=10, pady=10)
+    
+    # Orta: Ürün Ekleme
+    add_frame = ttk.Frame(content, style="Card.TFrame"); add_frame.pack(fill="x", pady=(0,10))
+    
+    ttk.Label(add_frame, text=t('barcode')).pack(side="left", padx=10, pady=10)
+    e_barcode = ttk.Entry(add_frame); e_barcode.pack(side="left", padx=10, pady=10)
+    e_barcode.focus_set()
 
+    def show_product_selector():
+        dialog = tk.Toplevel(parent)
+        dialog.title(t('product_search'))
+        dialog.geometry("600x400")
+        
+        # Search
+        f_top = ttk.Frame(dialog); f_top.pack(fill="x", padx=10, pady=10)
+        ttk.Label(f_top, text=t('search')).pack(side="left")
+        sv_search = tk.StringVar()
+        e_search = ttk.Entry(f_top, textvariable=sv_search)
+        e_search.pack(side="left", fill="x", expand=True, padx=5)
+        e_search.focus_set()
+        
+        # List
+        cols = ("no", "name", "stock", "buy_price")
+        tree_prod = ttk.Treeview(dialog, columns=cols, show="headings")
+        tree_prod.heading("no", text="No"); tree_prod.column("no", width=40, anchor="center")
+        tree_prod.heading("name", text=t('product')); tree_prod.column("name", width=200)
+        tree_prod.heading("stock", text=t('stock')); tree_prod.column("stock", width=80)
+        tree_prod.heading("buy_price", text=t('buy_price')); tree_prod.column("buy_price", width=80)
+        tree_prod.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        def load_prods(*args):
+            for i in tree_prod.get_children(): tree_prod.delete(i)
+            prods = product_svc.list_products(cursor, sv_search.get())
+            for idx, p in enumerate(prods, 1):
+                # p: (id, name, barcode, sale_price, stock, buy_price, unit, category_id)
+                tree_prod.insert("", "end", text=str(p[0]), values=(idx, p[1], p[4], p[5]))
+                
+        sv_search.trace("w", load_prods)
+        load_prods()
+        
+        def on_select(event):
+            sel = tree_prod.selection()
+            if not sel: return
+            pid = tree_prod.item(sel[0])["text"]
+            dialog.destroy()
+            add_item_to_list((pid,))
+            
+        tree_prod.bind("<Double-1>", on_select)
+        tree_prod.bind("<Return>", on_select)
+
+    ttk.Button(add_frame, text="🔍 " + t('find_product'), command=show_product_selector).pack(side="left", padx=10)
+    
+    def on_barcode_enter(event=None):
+        bc = e_barcode.get().strip()
+        if not bc: return
+        res = product_svc.get_by_barcode(cursor, bc)
+        if res:
+            add_item_to_list(res)
+            e_barcode.delete(0, tk.END)
+        else:
+            messagebox.showwarning(t('warning'), t('product_not_found'))
+            
+    e_barcode.bind("<Return>", on_barcode_enter)
+    
+    # Liste
+    list_frame = ttk.Frame(content, style="Card.TFrame"); list_frame.pack(fill="both", expand=True)
+    
+    columns = ("no", "name", "qty", "price", "total")
+    tree = ttk.Treeview(list_frame, columns=columns, show="headings")
+    tree.heading("no", text="No"); tree.column("no", width=40, anchor="center")
+    tree.heading("name", text=t('product')); tree.column("name", width=200)
+    tree.heading("qty", text=t('quantity')); tree.column("qty", width=80)
+    tree.heading("price", text=t('buy_price')); tree.column("price", width=100)
+    tree.heading("total", text=t('total')); tree.column("total", width=100)
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    items_data = [] # list of dict
+    
+    def add_item_to_list(prod_tuple):
+        pid = prod_tuple[0]
+        full_prod = product_svc.get_by_id(cursor, pid) # (id, name, barcode, sale_price, stock, buy_price, unit)
+        buy_price = full_prod[5]
+        
+        # Ask for Qty and Price
+        qty_str = simpledialog.askstring(t('quantity'), f"{full_prod[1]}\n{t('quantity')}:", parent=parent)
+        if not qty_str: return
+        try: qty = float(qty_str)
+        except: return
+        
+        price_str = simpledialog.askstring(t('price'), f"{t('buy_price')}:", initialvalue=str(buy_price), parent=parent)
+        if not price_str: return
+        try: price = float(price_str)
+        except: return
+        
+        total = qty * price
+        items_data.append({
+            'product_id': pid,
+            'name': full_prod[1],
+            'qty': qty,
+            'price': price,
+            'total': total
+        })
+        refresh_list()
+        
+    def refresh_list():
+        for i in tree.get_children(): tree.delete(i)
+        grand_total = 0
+        for idx, item in enumerate(items_data, 1):
+            tree.insert("", "end", text=str(item['product_id']), values=(idx, item['name'], item['qty'], item['price'], item['total']))
+            grand_total += item['total']
+        lbl_total.config(text=f"{t('total')}: {grand_total:.2f} ₺")
+        
+    lbl_total = ttk.Label(list_frame, text="Total: 0.00 ₺", font=("Segoe UI", 14, "bold"))
+    lbl_total.pack(pady=10)
+    
+    def save_doc():
+        if not items_data: return
+        supplier_name = cb_supplier.get()
+        supplier_id = None
+        if supplier_name:
+            for s in suppliers:
+                if s[1] == supplier_name:
+                    supplier_id = s[0]
+                    break
+        
+        doc_no = e_doc_no.get().strip()
+        doc_date = e_date.get().strip()
+        
+        try:
+            purchase_svc.create_purchase(conn, cursor, supplier_id, doc_type, doc_no, doc_date, items_data)
+            messagebox.showinfo(t('success'), t('saved'))
+            items_data.clear()
+            refresh_list()
+            e_doc_no.delete(0, tk.END)
+        except Exception as e:
+            messagebox.showerror(t('error'), str(e))
+            
+    tk.Button(list_frame, text="💾 " + t('save'), command=save_doc, bg=ACCENT, fg="white", relief="flat", padx=20, pady=10).pack(pady=10)
+
+def mount_irsaliye(parent):
+    _mount_purchase_screen(parent, 'irsaliye')
 
 def mount_fatura(parent):
-    for w in parent.winfo_children():
-        w.destroy()
-    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12, 8))
-    ttk.Label(header, text="🧾 " + t('invoice_entry'), style="Header.TLabel").pack(side="left", padx=8)
+    _mount_purchase_screen(parent, 'fatura')
+
+def mount_irsaliye_listesi(parent):
+    _mount_purchase_list(parent, 'irsaliye')
+
+def mount_fatura_listesi(parent):
+    _mount_purchase_list(parent, 'fatura')
+
+def _mount_purchase_list(parent, doc_type):
+    for w in parent.winfo_children(): w.destroy()
+    
+    title_key = 'dispatch_list' if doc_type == 'irsaliye' else 'invoice_list'
+    icon = "🚚" if doc_type == 'irsaliye' else "🧾"
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text=f"{icon} {t(title_key)}", style="Header.TLabel").pack(side="left", padx=8)
+    
     body = ttk.Frame(parent, style="Card.TFrame"); body.pack(fill="both", expand=True, padx=12, pady=8)
-    ttk.Label(body, text=t('invoice_entry_coming'), font=("Segoe UI", 12), background=CARD_COLOR).pack(expand=True, padx=16, pady=16)
+    
+    cols = ("no", "supplier", "doc_no", "date", "total", "desc")
+    tree = ttk.Treeview(body, columns=cols, show="headings")
+    tree.heading("no", text="No"); tree.column("no", width=50, anchor="center")
+    tree.heading("supplier", text=t('supplier_list')); tree.column("supplier", width=200)
+    tree.heading("doc_no", text="Belge No"); tree.column("doc_no", width=100)
+    tree.heading("date", text=t('date')); tree.column("date", width=100)
+    tree.heading("total", text=t('total')); tree.column("total", width=100, anchor="e")
+    tree.heading("desc", text=t('description')); tree.column("desc", width=200)
+    
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    # Load data
+    def load_data():
+        for i in tree.get_children(): tree.delete(i)
+        docs = purchase_svc.list_documents(cursor, doc_type)
+        for idx, d in enumerate(docs, 1):
+            # d: (id, supplier_name, doc_type, doc_number, doc_date, total_amount, description)
+            tree.insert("", "end", text=str(d[0]), values=(idx, d[1] or "-", d[3], d[4], f"{d[5]:.2f} ₺", d[6] or ""))
+    load_data()
+        
+    # Detail view on double click
+    def on_double_click(event):
+        sel = tree.selection()
+        if not sel: return
+        item = tree.item(sel[0])
+        doc_id = item['text']
+        show_purchase_details(parent, doc_id)
+        
+    tree.bind("<Double-1>", on_double_click)
+
+    # Buttons
+    btn_frame = ttk.Frame(body); btn_frame.pack(fill="x", padx=10, pady=10)
+    
+    def delete_selected():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning(t('warning'), t('select_record'))
+            return
+        
+        if not messagebox.askyesno(t('confirm'), t('delete_confirm')):
+            return
+            
+        doc_id = tree.item(sel[0])['text']
+        try:
+            purchase_svc.delete_purchase(conn, cursor, doc_id)
+            messagebox.showinfo(t('success'), t('deleted'))
+            load_data()
+        except Exception as e:
+            messagebox.showerror(t('error'), str(e))
+
+    tk.Button(btn_frame, text="🗑 " + t('delete'), command=delete_selected, bg="#dc3545", fg="white", relief="flat", padx=15, pady=8).pack(side="right", padx=5)
+    
+    # Edit (For now, just delete and re-enter logic or simple info edit? 
+    # Since full edit is complex, we will guide user to delete and re-enter for now, 
+    # OR implement a basic edit that just opens the details. 
+    # User asked for "Edit", let's provide a way to view details which is "Edit" in read-only mode for now, 
+    # or we can implement full edit later. 
+    # Actually, let's make "Edit" open the details window which we already have.)
+    
+    tk.Button(btn_frame, text="👁 " + t('details'), command=lambda: on_double_click(None), bg="#17a2b8", fg="white", relief="flat", padx=15, pady=8).pack(side="right", padx=5)
+
+def show_purchase_details(parent, doc_id):
+    dialog = tk.Toplevel(parent)
+    dialog.title(t('details'))
+    dialog.geometry("800x600")
+    dialog.configure(bg=BG_COLOR)
+    
+    # Fetch data
+    doc = purchase_svc.get_document(cursor, doc_id)
+    if not doc: return
+    # doc: (id, supplier_id, doc_type, doc_number, doc_date, total_amount, description, created_at)
+    
+    items = purchase_svc.get_document_items(cursor, doc_id)
+    # items: (name, qty, price, total, product_id)
+    
+    # Header Info
+    header_frame = ttk.Frame(dialog, style="Card.TFrame")
+    header_frame.pack(fill="x", padx=10, pady=10)
+    
+    # Supplier Name
+    supplier_name = "-"
+    if doc[1]:
+        from services import cari_service as cs
+        sup = cs.get_by_id(cursor, doc[1])
+        if sup: supplier_name = sup[1]
+        
+    ttk.Label(header_frame, text=f"{t('supplier_list')}: {supplier_name}", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=10, pady=5, sticky="w")
+    ttk.Label(header_frame, text=f"Belge No: {doc[3]}", font=("Segoe UI", 10)).grid(row=0, column=1, padx=10, pady=5, sticky="w")
+    ttk.Label(header_frame, text=f"{t('date')}: {doc[4]}", font=("Segoe UI", 10)).grid(row=0, column=2, padx=10, pady=5, sticky="w")
+    ttk.Label(header_frame, text=f"{t('total')}: {doc[5]:.2f} ₺", font=("Segoe UI", 12, "bold"), foreground=ACCENT).grid(row=0, column=3, padx=10, pady=5, sticky="w")
+
+    # Items List
+    list_frame = ttk.Frame(dialog, style="Card.TFrame")
+    list_frame.pack(fill="both", expand=True, padx=10, pady=5)
+    
+    cols = ("name", "qty", "price", "total")
+    tree = ttk.Treeview(list_frame, columns=cols, show="headings")
+    tree.heading("name", text=t('product')); tree.column("name", width=250)
+    tree.heading("qty", text=t('quantity')); tree.column("qty", width=80, anchor="center")
+    tree.heading("price", text=t('price')); tree.column("price", width=100, anchor="e")
+    tree.heading("total", text=t('total')); tree.column("total", width=100, anchor="e")
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    for i in items:
+        tree.insert("", "end", values=(i[0], i[1], f"{i[2]:.2f}", f"{i[3]:.2f}"))
+
+    # Edit Mode Logic
+    def enable_edit():
+        dialog.destroy()
+        _mount_purchase_edit(parent, doc_id)
+
+    btn_frame = ttk.Frame(dialog, style="Card.TFrame")
+    btn_frame.pack(fill="x", padx=10, pady=10)
+    
+    tk.Button(btn_frame, text="✏️ " + t('edit'), command=enable_edit, bg="#ffc107", fg="black", relief="flat", padx=15, pady=8).pack(side="right", padx=5)
+    tk.Button(btn_frame, text=t('close'), command=dialog.destroy, bg="#6c757d", fg="white", relief="flat", padx=15, pady=8).pack(side="right", padx=5)
+
+def _mount_purchase_edit(parent, doc_id):
+    # Similar to _mount_purchase_screen but pre-filled and updates instead of creates
+    for w in parent.winfo_children(): w.destroy()
+    
+    doc = purchase_svc.get_document(cursor, doc_id)
+    if not doc: return
+    
+    doc_type = doc[2]
+    title_key = 'dispatch_entry' if doc_type == 'irsaliye' else 'invoice_entry'
+    icon = "🚚" if doc_type == 'irsaliye' else "🧾"
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text=f"{icon} {t(title_key)} ({t('edit')})", style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Info Frame
+    info_frame = ttk.Frame(content, style="Card.TFrame"); info_frame.pack(fill="x", pady=(0,10))
+    
+    ttk.Label(info_frame, text=t('supplier_list')).grid(row=0, column=0, padx=10, pady=10)
+    from services import cari_service as cs
+    suppliers = [c for c in cs.list_all(cursor) if c[5] == 'alacakli']
+    supplier_names = [s[1] for s in suppliers]
+    cb_supplier = ttk.Combobox(info_frame, values=supplier_names, width=30)
+    cb_supplier.grid(row=0, column=1, padx=10, pady=10)
+    
+    # Set current supplier
+    current_supplier_name = ""
+    if doc[1]:
+        sup = cs.get_by_id(cursor, doc[1])
+        if sup: 
+            current_supplier_name = sup[1]
+            cb_supplier.set(current_supplier_name)
+            
+    ttk.Label(info_frame, text="Belge No:").grid(row=0, column=2, padx=10, pady=10)
+    e_doc_no = ttk.Entry(info_frame); e_doc_no.grid(row=0, column=3, padx=10, pady=10)
+    e_doc_no.insert(0, doc[3])
+    
+    ttk.Label(info_frame, text=t('date')).grid(row=0, column=4, padx=10, pady=10)
+    e_date = ttk.Entry(info_frame); e_date.grid(row=0, column=5, padx=10, pady=10)
+    e_date.insert(0, doc[4])
+    
+    # Add Item Frame
+    add_frame = ttk.Frame(content, style="Card.TFrame"); add_frame.pack(fill="x", pady=(0,10))
+    
+    ttk.Label(add_frame, text=t('barcode')).pack(side="left", padx=10, pady=10)
+    e_barcode = ttk.Entry(add_frame); e_barcode.pack(side="left", padx=10, pady=10)
+    e_barcode.focus_set()
+    
+    # Items Data
+    items_data = []
+    db_items = purchase_svc.get_document_items(cursor, doc_id)
+    for i in db_items:
+        # i: (name, qty, price, total, product_id)
+        items_data.append({
+            'product_id': i[4],
+            'name': i[0],
+            'qty': i[1],
+            'price': i[2],
+            'total': i[3]
+        })
+
+    # List Frame
+    list_frame = ttk.Frame(content, style="Card.TFrame"); list_frame.pack(fill="both", expand=True)
+    
+    columns = ("no", "name", "qty", "price", "total")
+    tree = ttk.Treeview(list_frame, columns=columns, show="headings")
+    tree.heading("no", text="No"); tree.column("no", width=40, anchor="center")
+    tree.heading("name", text=t('product')); tree.column("name", width=200)
+    tree.heading("qty", text=t('quantity')); tree.column("qty", width=80)
+    tree.heading("price", text=t('buy_price')); tree.column("price", width=100)
+    tree.heading("total", text=t('total')); tree.column("total", width=100)
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    lbl_total = ttk.Label(list_frame, text="Total: 0.00 ₺", font=("Segoe UI", 14, "bold"))
+    lbl_total.pack(pady=10)
+
+    def refresh_list():
+        for i in tree.get_children(): tree.delete(i)
+        grand_total = 0
+        for idx, item in enumerate(items_data, 1):
+            tree.insert("", "end", text=str(item['product_id']), values=(idx, item['name'], item['qty'], item['price'], item['total']))
+            grand_total += item['total']
+        lbl_total.config(text=f"{t('total')}: {grand_total:.2f} ₺")
+
+    refresh_list()
+
+    def add_item_to_list(prod_tuple):
+        pid = prod_tuple[0]
+        full_prod = product_svc.get_by_id(cursor, pid)
+        buy_price = full_prod[5]
+        
+        qty_str = simpledialog.askstring(t('quantity'), f"{full_prod[1]}\n{t('quantity')}:", parent=parent)
+        if not qty_str: return
+        try: qty = float(qty_str)
+        except: return
+        
+        price_str = simpledialog.askstring(t('price'), f"{t('buy_price')}:", initialvalue=str(buy_price), parent=parent)
+        if not price_str: return
+        try: price = float(price_str)
+        except: return
+        
+        total = qty * price
+        items_data.append({
+            'product_id': pid,
+            'name': full_prod[1],
+            'qty': qty,
+            'price': price,
+            'total': total
+        })
+        refresh_list()
+
+    def on_barcode_enter(event=None):
+        bc = e_barcode.get().strip()
+        if not bc: return
+        res = product_svc.get_by_barcode(cursor, bc)
+        if res:
+            add_item_to_list(res)
+            e_barcode.delete(0, tk.END)
+        else:
+            messagebox.showwarning(t('warning'), t('product_not_found'))
+            
+    e_barcode.bind("<Return>", on_barcode_enter)
+
+    def show_product_selector():
+        dialog = tk.Toplevel(parent)
+        dialog.title(t('product_search'))
+        dialog.geometry("600x400")
+        f_top = ttk.Frame(dialog); f_top.pack(fill="x", padx=10, pady=10)
+        ttk.Label(f_top, text=t('search')).pack(side="left")
+        sv_search = tk.StringVar()
+        e_search = ttk.Entry(f_top, textvariable=sv_search)
+        e_search.pack(side="left", fill="x", expand=True, padx=5); e_search.focus_set()
+        cols = ("no", "name", "stock", "buy_price")
+        tree_prod = ttk.Treeview(dialog, columns=cols, show="headings")
+        tree_prod.heading("no", text="No"); tree_prod.column("no", width=40, anchor="center")
+        tree_prod.heading("name", text=t('product')); tree_prod.column("name", width=200)
+        tree_prod.heading("stock", text=t('stock')); tree_prod.column("stock", width=80)
+        tree_prod.heading("buy_price", text=t('buy_price')); tree_prod.column("buy_price", width=80)
+        tree_prod.pack(fill="both", expand=True, padx=10, pady=10)
+        def load_prods(*args):
+            for i in tree_prod.get_children(): tree_prod.delete(i)
+            prods = product_svc.list_products(cursor, sv_search.get())
+            for idx, p in enumerate(prods, 1): tree_prod.insert("", "end", text=str(p[0]), values=(idx, p[1], p[4], p[5]))
+        sv_search.trace("w", load_prods); load_prods()
+        def on_select(event):
+            sel = tree_prod.selection()
+            if not sel: return
+            pid = tree_prod.item(sel[0])["text"]
+            dialog.destroy()
+            add_item_to_list((pid,))
+        tree_prod.bind("<Double-1>", on_select); tree_prod.bind("<Return>", on_select)
+
+    ttk.Button(add_frame, text="🔍 " + t('find_product'), command=show_product_selector).pack(side="left", padx=10)
+    
+    # Remove item on double click
+    def remove_item(event):
+        sel = tree.selection()
+        if not sel: return
+        if messagebox.askyesno(t('confirm'), t('delete_confirm')):
+            idx = tree.index(sel[0])
+            items_data.pop(idx)
+            refresh_list()
+    tree.bind("<Double-1>", remove_item)
+    
+    def update_doc():
+        if not items_data: return
+        supplier_name = cb_supplier.get()
+        supplier_id = None
+        if supplier_name:
+            for s in suppliers:
+                if s[1] == supplier_name:
+                    supplier_id = s[0]
+                    break
+        
+        doc_no = e_doc_no.get().strip()
+        doc_date = e_date.get().strip()
+        
+        try:
+            purchase_svc.update_purchase(conn, cursor, doc_id, supplier_id, doc_no, doc_date, items_data)
+            messagebox.showinfo(t('success'), t('updated'))
+            # Return to list
+            if doc_type == 'irsaliye': mount_irsaliye_listesi(parent)
+            else: mount_fatura_listesi(parent)
+        except Exception as e:
+            messagebox.showerror(t('error'), str(e))
+            
+    tk.Button(list_frame, text="💾 " + t('update_btn'), command=update_doc, bg=ACCENT, fg="white", relief="flat", padx=20, pady=10).pack(pady=10)
+    tk.Button(list_frame, text="❌ " + t('cancel'), command=lambda: mount_fatura_listesi(parent) if doc_type=='fatura' else mount_irsaliye_listesi(parent), bg="#6c757d", fg="white", relief="flat", padx=20, pady=10).pack(pady=10)
 
 
 def mount_placeholder(parent, icon, title_text, body_text):
@@ -494,9 +977,10 @@ def _mount_cari_islem(parent, mode: str):
     frame = ttk.Frame(body, style="Card.TFrame"); frame.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=8, pady=12)
     body.grid_rowconfigure(4, weight=1)
     body.grid_columnconfigure(1, weight=1)
-    cols = (t('date'), t('islem_type'), t('tutar'), t('aciklama'))
+    cols = ("no", t('date'), t('islem_type'), t('tutar'), t('aciklama'))
     tree = ttk.Treeview(frame, columns=cols, show="headings", height=10)
-    for c in cols:
+    tree.heading("no", text="No"); tree.column("no", width=50, anchor="center")
+    for c in cols[1:]:
         tree.heading(c, text=c)
         anchor = "e" if c in (t('tutar'),) else ("w" if c in (t('aciklama'),) else "center")
         tree.column(c, anchor=anchor, width=140)
@@ -511,24 +995,246 @@ def _mount_cari_islem(parent, mode: str):
         row = next((c for c in cariler if c[1]==name), None)
         if not row:
             return
-        for mid, typ, tutar, acik, created in cs.list_hareketler(cursor, row[0]):
-            tree.insert("", "end", values=(str(created), str(typ), f"{float(tutar):.2f}", str(acik or "")))
+        for idx, (mid, typ, tutar, acik, created) in enumerate(cs.list_hareketler(cursor, row[0]), 1):
+            tree.insert("", "end", text=str(mid), values=(idx, str(created), str(typ), f"{float(tutar):.2f}", str(acik or "")))
 
     cb.bind("<<ComboboxSelected>>", lambda *_: load_moves())
     if cari_names:
         cb.set(cari_names[0]); load_moves()
 
 def mount_hizmet_listesi(parent):
-    mount_placeholder(parent, "🛠️", t('service_list'), t('coming_soon'))
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="🛠️ " + t('service_list'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Sol: Liste
+    left_panel = ttk.Frame(content, style="Card.TFrame"); left_panel.pack(side="left", fill="both", expand=True, padx=(0,8))
+    
+    columns = ("no", "name", "price", "desc")
+    tree = ttk.Treeview(left_panel, columns=columns, show="headings", height=15)
+    tree.heading("no", text="No"); tree.column("no", width=50, anchor="center")
+    tree.heading("name", text=t('service_name')); tree.column("name", width=200)
+    tree.heading("price", text=t('price')); tree.column("price", width=100)
+    tree.heading("desc", text=t('description')); tree.column("desc", width=250)
+    
+    scroll = ttk.Scrollbar(left_panel, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scroll.set)
+    scroll.pack(side="right", fill="y")
+    tree.pack(side="left", fill="both", expand=True)
+    
+    # Sağ: Form
+    right_panel = ttk.Frame(content, style="Card.TFrame", width=300); right_panel.pack(side="right", fill="y")
+    right_panel.pack_propagate(False)
+    
+    ttk.Label(right_panel, text=t('new_service'), style="Header.TLabel").pack(pady=10)
+    
+    ttk.Label(right_panel, text=t('service_name')).pack(anchor="w", padx=10)
+    e_name = ttk.Entry(right_panel); e_name.pack(fill="x", padx=10, pady=(0,10))
+    
+    ttk.Label(right_panel, text=t('price')).pack(anchor="w", padx=10)
+    e_price = ttk.Entry(right_panel); e_price.pack(fill="x", padx=10, pady=(0,10))
+    
+    ttk.Label(right_panel, text=t('description')).pack(anchor="w", padx=10)
+    e_desc = ttk.Entry(right_panel); e_desc.pack(fill="x", padx=10, pady=(0,10))
+    
+    def load_services():
+        for i in tree.get_children(): tree.delete(i)
+        for idx, s in enumerate(expense_svc.list_services(cursor), 1):
+            # s: (id, name, price, desc)
+            tree.insert("", "end", text=str(s[0]), values=(idx, s[1], s[2], s[3]))
+            
+    def save_service():
+        name = e_name.get().strip()
+        price = e_price.get().strip()
+        desc = e_desc.get().strip()
+        try:
+            expense_svc.add_service(conn, cursor, name, price, desc)
+            messagebox.showinfo(t('success'), t('saved'))
+            e_name.delete(0, tk.END); e_price.delete(0, tk.END); e_desc.delete(0, tk.END)
+            load_services()
+        except Exception as e:
+            messagebox.showerror(t('error'), str(e))
+            
+    def delete_service():
+        sel = tree.selection()
+        if not sel: return
+        if messagebox.askyesno(t('confirm'), t('confirm_delete')):
+            sid = tree.item(sel[0])["text"]
+            expense_svc.delete_service(conn, cursor, sid)
+            load_services()
+
+    tk.Button(right_panel, text="💾 " + t('save'), command=save_service, bg=ACCENT, fg="white", relief="flat", padx=10, pady=5).pack(fill="x", padx=10, pady=5)
+    tk.Button(right_panel, text="🗑️ " + t('delete'), command=delete_service, bg="#e74c3c", fg="white", relief="flat", padx=10, pady=5).pack(fill="x", padx=10, pady=5)
+    
+    load_services()
 
 def mount_masraf_ekle(parent):
-    mount_placeholder(parent, "➕", t('add_expense'), t('coming_soon'))
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="➕ " + t('add_expense'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    form_frame = ttk.Frame(content); form_frame.pack(pady=20)
+    
+    ttk.Label(form_frame, text=t('expense_title')).grid(row=0, column=0, sticky="w", pady=5)
+    e_title = ttk.Entry(form_frame, width=30); e_title.grid(row=0, column=1, pady=5)
+    
+    ttk.Label(form_frame, text=t('amount')).grid(row=1, column=0, sticky="w", pady=5)
+    e_amount = ttk.Entry(form_frame, width=30); e_amount.grid(row=1, column=1, pady=5)
+    
+    ttk.Label(form_frame, text=t('category')).grid(row=2, column=0, sticky="w", pady=5)
+    categories = ["Genel", "Kira", "Fatura", "Personel", "Yemek", "Ulaşım", "Diğer"]
+    cb_cat = ttk.Combobox(form_frame, values=categories, width=28); cb_cat.grid(row=2, column=1, pady=5)
+    cb_cat.set("Genel")
+    
+    ttk.Label(form_frame, text=t('description')).grid(row=3, column=0, sticky="w", pady=5)
+    e_desc = ttk.Entry(form_frame, width=30); e_desc.grid(row=3, column=1, pady=5)
+    
+    def save_expense():
+        title = e_title.get().strip()
+        amount = e_amount.get().strip()
+        cat = cb_cat.get()
+        desc = e_desc.get().strip()
+        try:
+            expense_svc.add_expense(conn, cursor, title, amount, cat, desc)
+            messagebox.showinfo(t('success'), t('saved'))
+            e_title.delete(0, tk.END); e_amount.delete(0, tk.END); e_desc.delete(0, tk.END)
+            load_recent_expenses()
+        except Exception as e:
+            messagebox.showerror(t('error'), str(e))
+            
+    tk.Button(form_frame, text="💾 " + t('save'), command=save_expense, bg=ACCENT, fg="white", relief="flat", padx=20, pady=10).grid(row=4, column=1, pady=20, sticky="e")
+    
+    # Son eklenenler listesi
+    ttk.Separator(content, orient="horizontal").pack(fill="x", padx=20, pady=10)
+    ttk.Label(content, text=t('recent_expenses'), style="Sub.TLabel").pack(anchor="w", padx=20)
+    
+    columns = ("no", "title", "amount", "cat", "desc", "date")
+    tree = ttk.Treeview(content, columns=columns, show="headings", height=8)
+    tree.heading("no", text="No"); tree.column("no", width=50, anchor="center")
+    tree.heading("title", text=t('expense_title')); tree.column("title", width=150)
+    tree.heading("amount", text=t('amount')); tree.column("amount", width=100)
+    tree.heading("cat", text=t('category')); tree.column("cat", width=100)
+    tree.heading("desc", text=t('description')); tree.column("desc", width=200)
+    tree.heading("date", text=t('date')); tree.column("date", width=150)
+    tree.pack(fill="both", expand=True, padx=20, pady=10)
+    
+    def load_recent_expenses():
+        for i in tree.get_children(): tree.delete(i)
+        for idx, ex in enumerate(expense_svc.list_expenses(cursor), 1):
+            # ex: (id, title, amount, cat, desc, date)
+            tree.insert("", "end", text=str(ex[0]), values=(idx, ex[1], ex[2], ex[3], ex[4], ex[5]))
+            
+    load_recent_expenses()
 
 def mount_masraf_raporu(parent):
-    mount_placeholder(parent, "📑", t('expense_report'), t('coming_soon'))
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="📑 " + t('expense_report'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Filtreler (Basitçe tümünü listele şimdilik)
+    
+    columns = ("no", "title", "amount", "cat", "desc", "date")
+    tree = ttk.Treeview(content, columns=columns, show="headings")
+    tree.heading("no", text="No"); tree.column("no", width=50, anchor="center")
+    tree.heading("title", text=t('expense_title')); tree.column("title", width=150)
+    tree.heading("amount", text=t('amount')); tree.column("amount", width=100)
+    tree.heading("cat", text=t('category')); tree.column("cat", width=100)
+    tree.heading("desc", text=t('description')); tree.column("desc", width=200)
+    tree.heading("date", text=t('date')); tree.column("date", width=150)
+    
+    scroll = ttk.Scrollbar(content, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scroll.set)
+    scroll.pack(side="right", fill="y")
+    tree.pack(side="left", fill="both", expand=True)
+    
+    total_lbl = ttk.Label(content, text="Total: 0.00 ₺", font=("Segoe UI", 12, "bold"))
+    total_lbl.pack(pady=10)
+    
+    def load_data():
+        for i in tree.get_children(): tree.delete(i)
+        total = 0.0
+        for idx, ex in enumerate(expense_svc.list_expenses(cursor), 1):
+            # ex: (id, title, amount, cat, desc, date)
+            tree.insert("", "end", text=str(ex[0]), values=(idx, ex[1], ex[2], ex[3], ex[4], ex[5]))
+            total += float(ex[2])
+        total_lbl.config(text=f"Total: {total:.2f} ₺")
+    load_data()
 
 def mount_tedarikci_listesi(parent):
-    mount_placeholder(parent, "🚚", t('supplier_list'), t('coming_soon'))
+    # Tedarikçi Listesi (Cari Tipi: Alacaklı olanlar)
+    from services import cari_service as cs
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="🚚 " + t('supplier_list'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Sol: Liste
+    left_panel = ttk.Frame(content, style="Card.TFrame"); left_panel.pack(side="left", fill="both", expand=True, padx=(0,8))
+    
+    columns = ("no", "name", "phone", "balance")
+    tree = ttk.Treeview(left_panel, columns=columns, show="headings", height=15)
+    tree.heading("no", text="No"); tree.column("no", width=50, anchor="center")
+    tree.heading("name", text=t('cari_name')); tree.column("name", width=200)
+    tree.heading("phone", text=t('phone')); tree.column("phone", width=120)
+    tree.heading("balance", text=t('balance')); tree.column("balance", width=100)
+    
+    scroll = ttk.Scrollbar(left_panel, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scroll.set)
+    scroll.pack(side="right", fill="y")
+    tree.pack(side="left", fill="both", expand=True)
+    
+    # Sağ: Ekleme Formu
+    right_panel = ttk.Frame(content, style="Card.TFrame", width=300); right_panel.pack(side="right", fill="y")
+    right_panel.pack_propagate(False)
+    
+    ttk.Label(right_panel, text=t('add'), style="Header.TLabel").pack(pady=10)
+    
+    ttk.Label(right_panel, text=t('cari_name')).pack(anchor="w", padx=10)
+    e_name = ttk.Entry(right_panel); e_name.pack(fill="x", padx=10, pady=(0,10))
+    
+    ttk.Label(right_panel, text=t('phone')).pack(anchor="w", padx=10)
+    e_phone = ttk.Entry(right_panel); e_phone.pack(fill="x", padx=10, pady=(0,10))
+    
+    ttk.Label(right_panel, text=t('address')).pack(anchor="w", padx=10)
+    e_addr = ttk.Entry(right_panel); e_addr.pack(fill="x", padx=10, pady=(0,10))
+    
+    def load_suppliers():
+        for i in tree.get_children(): tree.delete(i)
+        # Sadece alacaklıları (tedarikçileri) filtrele
+        all_caris = cs.list_all(cursor)
+        idx = 1
+        for c in all_caris:
+            # c: (id, name, phone, address, balance, cari_type)
+            if c[5] == 'alacakli':
+                tree.insert("", "end", text=str(c[0]), values=(idx, c[1], c[2], f"{c[4]:.2f}"))
+                idx += 1
+                
+    def save_supplier():
+        name = e_name.get().strip()
+        phone = e_phone.get().strip()
+        addr = e_addr.get().strip()
+        try:
+            cs.add_cari(conn, cursor, name, phone, addr, 0.0, "alacakli")
+            messagebox.showinfo(t('success'), t('saved'))
+            e_name.delete(0, tk.END); e_phone.delete(0, tk.END); e_addr.delete(0, tk.END)
+            load_suppliers()
+        except Exception as e:
+            messagebox.showerror(t('error'), str(e))
+            
+    tk.Button(right_panel, text="💾 " + t('save'), command=save_supplier, bg=ACCENT, fg="white", relief="flat", padx=10, pady=5).pack(fill="x", padx=10, pady=5)
+    
+    load_suppliers()
 
 def mount_personel_vardiya(parent):
     mount_placeholder(parent, "🕒", t('shift_mgmt'), t('coming_soon'))
@@ -577,15 +1283,15 @@ def mount_users(parent):
     body.pack(fill="both", expand=True, padx=12, pady=8)
     
     # Modern table
-    cols = (t('id'), t('user'), t('role'))
+    cols = ("no", t('user'), t('role'))
     tree = ttk.Treeview(body, columns=cols, show="headings", height=14)
-    for c in cols: 
-        tree.heading(c, text=c)
-        tree.column(c, anchor="center", width=200)
+    tree.heading("no", text="No"); tree.column("no", anchor="center", width=50)
+    tree.heading(t('user'), text=t('user')); tree.column(t('user'), anchor="center", width=200)
+    tree.heading(t('role'), text=t('role')); tree.column(t('role'), anchor="center", width=200)
     
     # Zebrastripe
-        tree.tag_configure('oddrow', background='#1f1f25')
-        tree.tag_configure('evenrow', background='#252530')
+    tree.tag_configure('oddrow', background='#1f1f25')
+    tree.tag_configure('evenrow', background='#252530')
     
     original_insert = tree.insert
     def insert_with_tags(*args, **kwargs):
@@ -604,8 +1310,9 @@ def mount_users(parent):
 
     def load():
         for r in tree.get_children(): tree.delete(r)
-        for row in users_svc.list_users(cursor):
-            tree.insert("", "end", values=row)
+        for idx, row in enumerate(users_svc.list_users(cursor), 1):
+            # row: (id, username, role)
+            tree.insert("", "end", text=str(row[0]), values=(idx, row[1], row[2]))
 
     def add_user():
         u = simpledialog.askstring(t('new_user'), t('username'))
@@ -624,7 +1331,11 @@ def mount_users(parent):
     def edit_user():
         sel = tree.selection()
         if not sel: return messagebox.showwarning(t('warning'), t('select_item'))
-        uid, uname, role = tree.item(sel[0])["values"]
+        item = tree.item(sel[0])
+        uid = item["text"]
+        uname = item["values"][1]
+        role = item["values"][2]
+        
         new_u = simpledialog.askstring(t('edit'), t('username'), initialvalue=uname)
         if new_u is None: return
         new_p = simpledialog.askstring(t('edit'), t('new_password'))
@@ -635,7 +1346,10 @@ def mount_users(parent):
     def delete_user():
         sel = tree.selection()
         if not sel: return messagebox.showwarning(t('warning'), t('select_item'))
-        uid, uname, _ = tree.item(sel[0])["values"]
+        item = tree.item(sel[0])
+        uid = item["text"]
+        uname = item["values"][1]
+        
         if uname=="admin": return messagebox.showwarning(t('warning'), t('admin_delete_error'))
         if messagebox.askyesno(t('confirm'), f"{uname} {t('delete_confirm')}"):
             try:
@@ -836,15 +1550,14 @@ def mount_reports(parent):
     body.pack(fill="both", expand=True, padx=12, pady=8)
     
     # Modern table
-    cols = (t('receipt_no'), t('date'), t('product'), t('quantity'), t('price'), t('total'))
+    cols = ("no", t('date'), t('product'), t('quantity'), t('price'), t('total'))
     tree = ttk.Treeview(body, columns=cols, show="headings", height=12)
-    for c in cols: tree.heading(c, text=c)
-    tree.column(t('receipt_no'), width=140, anchor="center")
-    tree.column(t('date'), width=140, anchor="center")
-    tree.column(t('product'), width=220, anchor="w")
-    tree.column(t('quantity'), width=80, anchor="center")
-    tree.column(t('price'), width=100, anchor="e")
-    tree.column(t('total'), width=110, anchor="e")
+    tree.heading("no", text="No"); tree.column("no", width=50, anchor="center")
+    tree.heading(t('date'), text=t('date')); tree.column(t('date'), width=140, anchor="center")
+    tree.heading(t('product'), text=t('product')); tree.column(t('product'), width=220, anchor="w")
+    tree.heading(t('quantity'), text=t('quantity')); tree.column(t('quantity'), width=80, anchor="center")
+    tree.heading(t('price'), text=t('price')); tree.column(t('price'), width=100, anchor="e")
+    tree.heading(t('total'), text=t('total')); tree.column(t('total'), width=110, anchor="e")
     
     # Zebrastripe
     tree.tag_configure('oddrow', background='#1f1f25')
@@ -882,11 +1595,11 @@ def mount_reports(parent):
         rows = sales_svc.list_sales_between(cursor, f"{frm} 00:00:00", to_plus)
 
         t_qty=0; t_sum=0.0
-        for fis_id, ts, pname, qty, price, total in rows:
+        for idx, (fis_id, ts, pname, qty, price, total) in enumerate(rows, 1):
             ts_disp = (ts or "").replace("T"," ")
             # miktarı virgüllü göstermek için
             qty_disp = f"{float(qty):.3f}" if abs(float(qty) - round(float(qty))) > 1e-6 else str(int(round(float(qty))))
-            tree.insert("", "end", values=(fis_id, ts_disp, pname, qty_disp, f"{float(price):.2f}", f"{float(total):.2f}"))
+            tree.insert("", "end", text=str(fis_id), values=(idx, ts_disp, pname, qty_disp, f"{float(price):.2f}", f"{float(total):.2f}"))
             t_qty += float(qty); t_sum += float(total)
         qty_total_disp = f"{t_qty:.3f}" if abs(t_qty - round(t_qty)) > 1e-6 else str(int(round(t_qty)))
         lbl_sum.config(text=f"{t('quantity')}: {qty_total_disp} | {t('total')}: {t_sum:.2f} ₺")
@@ -1104,13 +1817,23 @@ def mount_cariler(parent):
     right.pack(side="left", fill="y", padx=(4,8), pady=8)
 
     # Modern table
-    cols = (t('id'), t('name'), t('phone'), t('balance'), t('cari_type'))
-    tree = ttk.Treeview(left, columns=cols, show="headings")
-    for c in cols:
-        tree.heading(c, text=c)
-    tree.column(t('id'), width=60, anchor="center")
+    cols = (t('id'), t('name'), t('phone'), t('tax_office'), t('tax_number'), t('balance'), t('cari_type'))
+    tree = ttk.Treeview(left, columns=cols, show="headings", displaycolumns=(t('id'), t('name'), t('phone'), t('tax_office'), t('tax_number'), t('balance'), t('cari_type')))
+    
+    # Sütun başlıklarını ayarla
+    tree.heading(t('id'), text="No") # ID başlığını "No" olarak değiştir
+    tree.heading(t('name'), text=t('name'))
+    tree.heading(t('phone'), text=t('phone'))
+    tree.heading(t('tax_office'), text=t('tax_office'))
+    tree.heading(t('tax_number'), text=t('tax_number'))
+    tree.heading(t('balance'), text=t('balance'))
+    tree.heading(t('cari_type'), text=t('cari_type'))
+
+    tree.column(t('id'), width=40, anchor="center")
     tree.column(t('name'), anchor="w", width=200)
     tree.column(t('phone'), anchor="w", width=120)
+    tree.column(t('tax_office'), anchor="w", width=120)
+    tree.column(t('tax_number'), anchor="w", width=120)
     tree.column(t('balance'), anchor="e", width=120)
     tree.column(t('cari_type'), anchor="center", width=100)
     
@@ -1143,6 +1866,12 @@ def mount_cariler(parent):
     
     lbl(right, t('address'))
     entry_address = ent()
+
+    lbl(right, t('tax_office'))
+    entry_vergi_dairesi = ent()
+
+    lbl(right, t('tax_number'))
+    entry_vergi_no = ent()
     
     lbl(right, t('balance'))
     entry_balance = ent()
@@ -1160,14 +1889,39 @@ def mount_cariler(parent):
             tree.delete(r)
         results = cari_service.search_by_name(cursor, search) if search else cari_service.list_all(cursor)
         for idx, row in enumerate(results):
-            cari_id, name, phone, address, balance, ctype = row
+            # Unpack with new columns (8 columns total now)
+            if len(row) == 8:
+                cari_id, name, phone, address, balance, ctype, vd, vn = row
+            else:
+                # Fallback for old data if any issue
+                cari_id, name, phone, address, balance, ctype = row[:6]
+                vd, vn = "", ""
+
             balance_str = f"{float(balance):.2f} ₺"
             type_str = t('alacakli') if ctype == 'alacakli' else t('borclu')
             
             tag = 'evenrow' if idx % 2 == 0 else 'oddrow'
             color_tag = 'positive' if float(balance) >= 0 else 'negative'
             
-            item = tree.insert("", "end", values=(cari_id, name, phone, balance_str, type_str), tags=(tag, color_tag))
+            # ID yerine sıra numarası göster (idx + 1)
+            # Ancak gerçek ID'yi saklamamız lazım. Treeview'da values listesinde ID'yi tutuyoruz ama
+            # ekranda göstermek için values[0]'ı değiştirirsek, seçme işleminde ID'yi alamayız.
+            # Bu yüzden values listesine ID'yi en sona ekleyip, displaycolumns ile gizleyebiliriz.
+            # Veya daha basiti: values[0] (ID sütunu) içine sıra numarasını yazıp,
+            # gerçek ID'yi tree item'ın 'text' özelliğine veya gizli bir sütuna koyabiliriz.
+            # Burada en kolayı: ID sütununu "No" olarak kullanmak ve gerçek ID'yi values'un sonuna eklemek.
+            # Ancak columns tanımını değiştirmemiz gerekir.
+            
+            # Mevcut columns: (id, name, phone, tax_office, tax_number, balance, cari_type)
+            # Biz values'a şunu vereceğiz: (idx+1, name, phone, vd, vn, balance_str, type_str, cari_id)
+            # Ve columns tanımına bir tane daha ekleyeceğiz veya displaycolumns kullanacağız.
+            
+            # Pratik çözüm:
+            # columns listesini değiştirmeden, values[0]'a sıra no yazalım.
+            # Gerçek ID'yi tree.insert(..., text=cari_id) ile saklayalım.
+            # Seçim yaparken tree.item(sel)['text'] ile ID'yi alalım.
+            
+            item = tree.insert("", "end", text=str(cari_id), values=(idx+1, name, phone, vd, vn, balance_str, type_str), tags=(tag, color_tag))
         
         update_summary()
 
@@ -1179,7 +1933,9 @@ def mount_cariler(parent):
                 entry_phone.get(),
                 entry_address.get(),
                 entry_balance.get(),
-                cari_type_var.get()
+                cari_type_var.get(),
+                entry_vergi_dairesi.get(),
+                entry_vergi_no.get()
             )
             messagebox.showinfo(t('success'), t('cari_added'))
             clear_form()
@@ -1192,14 +1948,17 @@ def mount_cariler(parent):
         if not sel:
             return messagebox.showwarning(t('warning'), t('select_item'))
         
-        cari_id = tree.item(sel[0])["values"][0]
+        # ID'yi text özelliğinden al
+        cari_id = tree.item(sel[0])["text"]
         try:
             cari_service.update_cari(
                 conn, cursor, cari_id,
                 entry_name.get(),
                 entry_phone.get(),
                 entry_address.get(),
-                cari_type_var.get()
+                cari_type_var.get(),
+                entry_vergi_dairesi.get(),
+                entry_vergi_no.get()
             )
             messagebox.showinfo(t('success'), t('cari_updated'))
             clear_form()
@@ -1215,7 +1974,8 @@ def mount_cariler(parent):
         if not messagebox.askyesno(t('confirm'), t('delete_confirm')):
             return
         
-        cari_id = tree.item(sel[0])["values"][0]
+        # ID'yi text özelliğinden al
+        cari_id = tree.item(sel[0])["text"]
         try:
             cari_service.delete_cari(conn, cursor, cari_id)
             messagebox.showinfo(t('success'), t('cari_deleted'))
@@ -1228,6 +1988,8 @@ def mount_cariler(parent):
         entry_name.delete(0, tk.END)
         entry_phone.delete(0, tk.END)
         entry_address.delete(0, tk.END)
+        entry_vergi_dairesi.delete(0, tk.END)
+        entry_vergi_no.delete(0, tk.END)
         entry_balance.delete(0, tk.END)
         entry_balance.insert(0, "0")
         cari_type_var.set('alacakli')
@@ -1236,7 +1998,8 @@ def mount_cariler(parent):
         sel = tree.selection()
         if not sel:
             return
-        cari_id = tree.item(sel[0])["values"][0]
+        # ID'yi text özelliğinden al
+        cari_id = tree.item(sel[0])["text"]
         cari = cari_service.get_by_id(cursor, cari_id)
         if cari:
             entry_name.delete(0, tk.END)
@@ -1245,9 +2008,17 @@ def mount_cariler(parent):
             entry_phone.insert(0, cari[2] or "")
             entry_address.delete(0, tk.END)
             entry_address.insert(0, cari[3] or "")
+            
             entry_balance.delete(0, tk.END)
             entry_balance.insert(0, str(cari[4]))
             cari_type_var.set(cari[5])
+
+            # New fields
+            entry_vergi_dairesi.delete(0, tk.END)
+            entry_vergi_no.delete(0, tk.END)
+            if len(cari) > 6:
+                entry_vergi_dairesi.insert(0, cari[6] or "")
+                entry_vergi_no.insert(0, cari[7] or "")
 
     tree.bind("<<TreeviewSelect>>", on_select)
     search_var.trace_add("write", lambda *args: load(search_var.get()))
@@ -1330,14 +2101,14 @@ def mount_sales(parent):
     barcode_entry = tk.Entry(barcode_frame, font=("Segoe UI", 14), bg="#ffffff", fg="#333333",
                              insertbackground="#000000", relief="flat", bd=0)
     barcode_entry.pack(side="left", fill="both", expand=True, padx=0, pady=8, ipady=6)
-    barcode_entry.insert(0, "Ürün Barkodunu Okutunuz...")
+    barcode_entry.insert(0, t('scan_product_placeholder'))
     barcode_entry.config(fg="#999999")
     
     # FONKSİYONLARI ÖNCE TANIMLA (butonlardan önce)
     def show_product_list():
         """Ürün listesini göster (ara butonuna basıldığında)"""
         search_text = barcode_entry.get().strip()
-        if "Okutunuz" in search_text:
+        if t('scan_product_placeholder') in search_text:
             search_text = ""
         
         # Ürün arama penceresi
@@ -1359,9 +2130,10 @@ def mount_sales(parent):
         list_frame = tk.Frame(search_win, bg=CARD_COLOR)
         list_frame.pack(fill="both", expand=True, padx=12, pady=8)
         
-        cols = (t('name'), t('barcode'), t('price'), t('stock'), t('unit'))
+        cols = ("no", t('name'), t('barcode'), t('price'), t('stock'), t('unit'))
         search_tree = ttk.Treeview(list_frame, columns=cols, show="headings", height=15)
-        for c in cols:
+        search_tree.heading("no", text="No"); search_tree.column("no", width=50, anchor="center")
+        for c in cols[1:]:
             search_tree.heading(c, text=c)
         search_tree.column(t('name'), width=300)
         search_tree.column(t('barcode'), width=150)
@@ -1375,11 +2147,13 @@ def mount_sales(parent):
                 search_tree.delete(item)
             from repositories import product_repository
             products = product_repository.list_all(cursor)
+            idx = 1
             for p in products:
                 pid, name, barcode, price, stock, buy_price, unit, category = p
                 if filter_text.lower() in name.lower() or filter_text in (barcode or ""):
-                    search_tree.insert("", "end", values=(name, barcode or "", f"{float(price):.2f}", 
+                    search_tree.insert("", "end", values=(idx, name, barcode or "", f"{float(price):.2f}", 
                                                           f"{float(stock):.2f}", unit or "adet"))
+                    idx += 1
         
         def on_search(e=None):
             load_products(search_entry.get().strip())
@@ -1395,13 +2169,13 @@ def mount_sales(parent):
                     sel = (children[0],)
             
             if sel:
-                pname = search_tree.item(sel[0])["values"][0]
+                pname = search_tree.item(sel[0])["values"][1]
                 add_product_to_cart(pname, 1)
                 
                 # Ana ekrandaki arama kutusunu temizle
                 try:
                     barcode_entry.delete(0, tk.END)
-                    barcode_entry.insert(0, "Ürün Barkodunu Okutunuz...")
+                    barcode_entry.insert(0, t('scan_product_placeholder'))
                     barcode_entry.config(fg="#999999")
                     # Odağı geri ver
                     barcode_entry.focus_set()
@@ -1435,8 +2209,8 @@ def mount_sales(parent):
     def show_price():
         """Barkod ile fiyat sorgulama"""
         barcode = barcode_entry.get().strip()
-        if "Okutunuz" in barcode or not barcode:
-            messagebox.showwarning(t('warning'), "Lütfen barkod okutun veya girin!")
+        if t('scan_product_placeholder') in barcode or not barcode:
+            messagebox.showwarning(t('warning'), t('scan_barcode'))
             return
         result = product_svc.get_by_barcode(cursor, barcode)
         if result:
@@ -2778,7 +3552,7 @@ def mount_sales(parent):
     def barcode_scan(event):
         """Barkod okutulduğunda veya Enter basıldığında"""
         barcode = barcode_entry.get().strip()
-        if not barcode or "Okutunuz" in barcode:
+        if not barcode or t('scan_product_placeholder') in barcode:
             return
         
         result = product_svc.get_by_barcode(cursor, barcode)
@@ -2786,20 +3560,20 @@ def mount_sales(parent):
             pid, pname, price, stock, unit = result
             add_product_to_cart(pname, 1)
             barcode_entry.delete(0, tk.END)
-            barcode_entry.insert(0, "Ürün Barkodunu Okutunuz...")
+            barcode_entry.insert(0, t('scan_product_placeholder'))
             barcode_entry.config(fg="#999999")
         else:
             # Barkod bulunamazsa Ara penceresini aç
             show_product_list()
     
     def barcode_focus_in(event):
-        if "Okutunuz" in barcode_entry.get():
+        if t('scan_product_placeholder') in barcode_entry.get():
             barcode_entry.delete(0, tk.END)
             barcode_entry.config(fg="#333333")
     
     def barcode_focus_out(event):
         if not barcode_entry.get().strip():
-            barcode_entry.insert(0, "Ürün Barkodunu Okutunuz...")
+            barcode_entry.insert(0, t('scan_product_placeholder'))
             barcode_entry.config(fg="#999999")
     
     def show_sale_options_dialog(fis_id, sales_list, customer_name, total_amount, on_confirm):
@@ -3053,43 +3827,51 @@ def mount_sales(parent):
                 sales_svc.insert_sale_line(conn, cursor, fis_id, d['pname'], d['qty'], d['price'], d['total'], payment_method=final_pm)
                 sales_list_for_print.append((d['pname'], d['qty'], d['price'], d['total']))
             
-            # AÇIK HESAP İŞLEMİ
-            if payment_method == "AÇIK HESAP":
+            # CARİ İŞLEMLERİ (Otomatik Cari Oluşturma ve Kayıt)
+            # Müşteri adı girildiyse işlem yap
+            if customer and customer != t('customer'):
                 try:
                     from services import cari_service as cs
                     cid = selected_customer_id.get()
-                    # Eğer listeden seçilmediyse isme göre bulmaya çalış
-                    if cid == 0 and customer and customer != t('customer'):
+                    
+                    # ID yoksa isme göre bul veya oluştur
+                    if cid == 0:
                         found = cs.get_by_name(cursor, customer)
                         if found:
                             cid = found[0]
+                        else:
+                            # Yeni cari oluştur (Varsayılan: Borçlu)
+                            try:
+                                cs.add_cari(conn, cursor, customer, "", "", 0.0, "borclu")
+                                # Yeni oluşturulan ID'yi al
+                                found_new = cs.get_by_name(cursor, customer)
+                                if found_new:
+                                    cid = found_new[0]
+                            except Exception as e:
+                                print(f"Yeni cari oluşturma hatası: {e}")
                     
                     if cid > 0:
-                        cs.add_borc(conn, cursor, cid, total_amount, f"Satış Fişi: {fis_id}")
-                    else:
-                        # Müşteri seçilmediyse uyarı verilebilir ama işlem devam ediyor
-                        # İstenirse burada return ile işlem durdurulabilir
-                        pass
-                except Exception as e:
-                    print(f"Açık hesap hatası: {e}")
+                        # 1. AÇIK HESAP: Sadece borç kaydet
+                        if payment_method == "AÇIK HESAP":
+                            cs.add_borc(conn, cursor, cid, total_amount, f"Satış Fişi: {fis_id}")
+                            
+                        # 2. NAKİT veya KART: Borç kaydet VE Alacak (Ödeme) kaydet
+                        elif payment_method in ["NAKİT", "credit_card"]:
+                            # Satışı borç olarak işle
+                            cs.add_borc(conn, cursor, cid, total_amount, f"Satış Fişi: {fis_id}")
+                            
+                            # Ödemeyi alacak olarak işle
+                            desc = "Nakit Ödeme" if payment_method == "NAKİT" else "Kredi Kartı Ödemesi"
+                            cs.add_alacak(conn, cursor, cid, total_amount, f"{desc} - Fiş: {fis_id}")
+                            
+                        # 3. PARÇALI ÖDEME: Sadece kalanı borç kaydet (Mevcut mantık)
+                        elif payment_method == "PARÇALI":
+                            remaining = PARTIAL_PAYMENT_DATA.get("remaining", 0.0)
+                            if remaining > 0.01:
+                                cs.add_borc(conn, cursor, cid, remaining, f"Satış Fişi (Parçalı): {fis_id}")
 
-            # PARÇALI ÖDEME İŞLEMİ
-            if payment_method == "PARÇALI":
-                try:
-                    from services import cari_service as cs
-                    remaining = PARTIAL_PAYMENT_DATA.get("remaining", 0.0)
-                    
-                    if remaining > 0.01:
-                        cid = selected_customer_id.get()
-                        if cid == 0 and customer and customer != t('customer'):
-                            found = cs.get_by_name(cursor, customer)
-                            if found:
-                                cid = found[0]
-                        
-                        if cid > 0:
-                            cs.add_borc(conn, cursor, cid, remaining, f"Satış Fişi (Parçalı): {fis_id}")
                 except Exception as e:
-                    print(f"Parçalı ödeme hatası: {e}")
+                    print(f"Cari işlem hatası: {e}")
 
             conn.commit()
             
@@ -3724,20 +4506,6 @@ def open_main_window(role, username):
         mbtn(menu, "🛒 " + t('sales'), lambda: mount_sales(right_panel))
         mbtn(menu, "🛑 " + t('cancel_sale'), lambda: mount_cancel_sales(right_panel))
 
-        # Ürün Yönetimi
-        products_header = mbtn(menu, "📦 " + t('product_mgmt'), lambda: None)
-        products_sub = ttk.Frame(menu, style="Card.TFrame")
-        products_visible = {"v": False}
-        def toggle_products():
-            if products_visible["v"]:
-                products_sub.pack_forget(); products_visible["v"] = False
-            else:
-                open_section(products_header, products_sub, products_visible)
-        products_header.config(command=toggle_products)
-        register_section(products_header, products_sub, products_visible)
-        msub(products_sub, t('product_list'), lambda: mount_products(right_panel))
-        msub(products_sub, t('category_mgmt'), lambda: mount_kategori(right_panel))
-
         # Stok Yönetimi
         stock_header = mbtn(menu, "📦 " + t('stock_mgmt'), lambda: None)
         stock_sub = ttk.Frame(menu, style="Card.TFrame")
@@ -3750,6 +4518,7 @@ def open_main_window(role, username):
         stock_header.config(command=toggle_stock)
         register_section(stock_header, stock_sub, stock_visible)
         msub(stock_sub, t('stock_list'), lambda: mount_products(right_panel))
+        msub(stock_sub, t('category_mgmt'), lambda: mount_kategori(right_panel))
         msub(stock_sub, t('stock_in'), lambda: mount_stok_giris(right_panel))
         msub(stock_sub, t('stock_out'), lambda: mount_stok_cikis(right_panel))
         msub(stock_sub, t('inventory_count'), lambda: mount_envanter_sayim(right_panel))
@@ -3798,6 +4567,8 @@ def open_main_window(role, username):
         register_section(purchase_header, purchase_sub, purchase_visible)
         msub(purchase_sub, t('dispatch_entry'), lambda: mount_irsaliye(right_panel))
         msub(purchase_sub, t('invoice_entry'), lambda: mount_fatura(right_panel))
+        msub(purchase_sub, t('dispatch_list'), lambda: mount_irsaliye_listesi(right_panel))
+        msub(purchase_sub, t('invoice_list'), lambda: mount_fatura_listesi(right_panel))
         msub(purchase_sub, t('supplier_list'), lambda: mount_tedarikci_listesi(right_panel))
 
         # Personel Yönetimi

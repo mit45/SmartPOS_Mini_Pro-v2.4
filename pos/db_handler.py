@@ -70,6 +70,8 @@ def init_schema(conn, cursor):
       address TEXT,
       balance REAL DEFAULT 0,
       cari_type TEXT DEFAULT 'alacakli',
+      vergi_dairesi TEXT,
+      vergi_no TEXT,
       created_at TEXT DEFAULT (datetime('now','localtime'))
     )""")
 
@@ -83,6 +85,54 @@ def init_schema(conn, cursor):
       aciklama TEXT,
       created_at TEXT DEFAULT (datetime('now','localtime')),
       FOREIGN KEY (cari_id) REFERENCES cariler(id)
+    )""")
+
+    # services (hizmetler)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS services(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      price REAL DEFAULT 0,
+      description TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+
+    # expenses (masraflar)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS expenses(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      amount REAL NOT NULL,
+      category TEXT,
+      description TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+
+    # purchase_documents (satın alma belgeleri: irsaliye/fatura)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS purchase_documents(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      supplier_id INTEGER,
+      doc_type TEXT, -- 'irsaliye' or 'fatura'
+      doc_number TEXT,
+      doc_date TEXT,
+      total_amount REAL DEFAULT 0,
+      description TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY (supplier_id) REFERENCES cariler(id)
+    )""")
+
+    # purchase_items (satın alma kalemleri)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS purchase_items(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      doc_id INTEGER,
+      product_id INTEGER,
+      product_name TEXT,
+      quantity REAL,
+      price REAL,
+      total REAL,
+      FOREIGN KEY (doc_id) REFERENCES purchase_documents(id)
     )""")
 
     # Backfill missing columns

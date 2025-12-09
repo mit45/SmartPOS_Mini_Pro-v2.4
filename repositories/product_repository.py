@@ -97,4 +97,16 @@ def decrement_stock(conn, cursor, name: str, qty: float) -> None:
 def increment_stock(conn, cursor, name: str, qty: float) -> None:
     cursor.execute("UPDATE products SET stock=stock+? WHERE name=?", (float(qty), name))
     conn.commit()
+
+def get_by_id(cursor, pid: int):
+    cursor.execute("SELECT id, name, barcode, sale_price, stock, buy_price, unit FROM products WHERE id=?", (pid,))
+    return cursor.fetchone()
+
+def update_stock(conn, cursor, pid: int, new_stock: float):
+    cursor.execute("UPDATE products SET stock=? WHERE id=?", (new_stock, pid))
+    conn.commit()
+
+def update_buy_price(conn, cursor, pid: int, new_price: float):
+    cursor.execute("UPDATE products SET buy_price=? WHERE id=?", (new_price, pid))
+    conn.commit()
  

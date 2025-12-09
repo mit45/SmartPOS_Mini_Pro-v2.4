@@ -2,37 +2,37 @@
 
 def list_all(cursor):
     """Tüm carileri listele"""
-    cursor.execute("SELECT id, name, phone, address, balance, cari_type FROM cariler ORDER BY name")
+    cursor.execute("SELECT id, name, phone, address, balance, cari_type, vergi_dairesi, vergi_no FROM cariler ORDER BY name")
     return cursor.fetchall()
 
 def search_by_name(cursor, name):
     """İsme göre cari ara"""
-    cursor.execute("SELECT id, name, phone, address, balance, cari_type FROM cariler WHERE name LIKE ? ORDER BY name", (f"%{name}%",))
+    cursor.execute("SELECT id, name, phone, address, balance, cari_type, vergi_dairesi, vergi_no FROM cariler WHERE name LIKE ? ORDER BY name", (f"%{name}%",))
     return cursor.fetchall()
 
 def get_by_id(cursor, cari_id):
     """ID'ye göre cari getir"""
-    cursor.execute("SELECT id, name, phone, address, balance, cari_type FROM cariler WHERE id=?", (cari_id,))
+    cursor.execute("SELECT id, name, phone, address, balance, cari_type, vergi_dairesi, vergi_no FROM cariler WHERE id=?", (cari_id,))
     return cursor.fetchone()
 
 def get_by_name(cursor, name):
     """İsme göre cari getir"""
-    cursor.execute("SELECT id, name, phone, address, balance, cari_type FROM cariler WHERE name=?", (name,))
+    cursor.execute("SELECT id, name, phone, address, balance, cari_type, vergi_dairesi, vergi_no FROM cariler WHERE name=?", (name,))
     return cursor.fetchone()
 
-def add(conn, cursor, name, phone, address, balance, cari_type):
+def add(conn, cursor, name, phone, address, balance, cari_type, vergi_dairesi, vergi_no):
     """Yeni cari ekle"""
     cursor.execute(
-        "INSERT INTO cariler(name, phone, address, balance, cari_type) VALUES(?,?,?,?,?)",
-        (name, phone, address, balance, cari_type)
+        "INSERT INTO cariler(name, phone, address, balance, cari_type, vergi_dairesi, vergi_no) VALUES(?,?,?,?,?,?,?)",
+        (name, phone, address, balance, cari_type, vergi_dairesi, vergi_no)
     )
     conn.commit()
 
-def update(conn, cursor, cari_id, name, phone, address, cari_type):
+def update(conn, cursor, cari_id, name, phone, address, cari_type, vergi_dairesi, vergi_no):
     """Cari bilgilerini güncelle (bakiye hariç)"""
     cursor.execute(
-        "UPDATE cariler SET name=?, phone=?, address=?, cari_type=? WHERE id=?",
-        (name, phone, address, cari_type, cari_id)
+        "UPDATE cariler SET name=?, phone=?, address=?, cari_type=?, vergi_dairesi=?, vergi_no=? WHERE id=?",
+        (name, phone, address, cari_type, vergi_dairesi, vergi_no, cari_id)
     )
     conn.commit()
 

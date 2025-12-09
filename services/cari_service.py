@@ -19,7 +19,7 @@ def get_by_name(cursor, name):
     """İsme göre cari getir"""
     return repo.get_by_name(cursor, name)
 
-def add_cari(conn, cursor, name, phone, address, balance, cari_type):
+def add_cari(conn, cursor, name, phone, address, balance, cari_type, vergi_dairesi="", vergi_no=""):
     """Yeni cari ekle"""
     if not name or not name.strip():
         raise ValueError("Cari adı boş olamaz")
@@ -27,6 +27,8 @@ def add_cari(conn, cursor, name, phone, address, balance, cari_type):
     name = name.strip()
     phone = phone.strip() if phone else ""
     address = address.strip() if address else ""
+    vergi_dairesi = vergi_dairesi.strip() if vergi_dairesi else ""
+    vergi_no = vergi_no.strip() if vergi_no else ""
     
     try:
         balance = float(balance) if balance else 0.0
@@ -36,9 +38,9 @@ def add_cari(conn, cursor, name, phone, address, balance, cari_type):
     if cari_type not in ['alacakli', 'borclu']:
         cari_type = 'alacakli'
     
-    repo.add(conn, cursor, name, phone, address, balance, cari_type)
+    repo.add(conn, cursor, name, phone, address, balance, cari_type, vergi_dairesi, vergi_no)
 
-def update_cari(conn, cursor, cari_id, name, phone, address, cari_type):
+def update_cari(conn, cursor, cari_id, name, phone, address, cari_type, vergi_dairesi="", vergi_no=""):
     """Cari bilgilerini güncelle"""
     if not name or not name.strip():
         raise ValueError("Cari adı boş olamaz")
@@ -46,11 +48,13 @@ def update_cari(conn, cursor, cari_id, name, phone, address, cari_type):
     name = name.strip()
     phone = phone.strip() if phone else ""
     address = address.strip() if address else ""
+    vergi_dairesi = vergi_dairesi.strip() if vergi_dairesi else ""
+    vergi_no = vergi_no.strip() if vergi_no else ""
     
     if cari_type not in ['alacakli', 'borclu']:
         cari_type = 'alacakli'
     
-    repo.update(conn, cursor, cari_id, name, phone, address, cari_type)
+    repo.update(conn, cursor, cari_id, name, phone, address, cari_type, vergi_dairesi, vergi_no)
 
 def delete_cari(conn, cursor, cari_id):
     """Cari sil"""
