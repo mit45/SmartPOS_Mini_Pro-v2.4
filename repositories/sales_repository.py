@@ -1,5 +1,5 @@
 """Sales repository: raw DB operations for sales table."""
-from typing import Optional, List, Tuple
+from typing import List, Tuple
 
 def insert_line(conn, cursor,
                 fis_id: str,

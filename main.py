@@ -1,8 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
-import sqlite3, os, sys, csv, subprocess, time, glob, tempfile
+import sqlite3, os, csv, subprocess, time, glob, tempfile
 from datetime import datetime, date
-from PIL import Image, ImageTk # type: ignore
 from languages import LANGUAGES
 from pos.db_handler import get_connection, init_schema
 from services import product_service as product_svc
@@ -1315,89 +1314,6 @@ def mount_sales(parent):
     main_container.pack(fill="both", expand=True, padx=0, pady=0)
     
     # === SOL MEN��: AÇILIR KAPANIR ===
-    menu_state = {"open": False}
-    
-    # Menü butonu (hamburger)
-    menu_btn_container = tk.Frame(main_container, bg="#1a1a20", width=60, height=60)
-    menu_btn_container.place(x=0, y=0)
-    
-    menu_btn = tk.Button(menu_btn_container, text="☰", font=("Segoe UI", 24),
-                        bg="#20c997", fg="white", relief="flat", padx=8, pady=4,
-                        cursor="hand2", borderwidth=0, activebackground="#17a589")
-    menu_btn.pack(fill="both", expand=True)
-    
-    # Menü paneli (başlangıçta gizli)
-    menu_panel = tk.Frame(main_container, bg="#1a1a20", width=250)
-    
-    def toggle_menu():
-        if menu_state["open"]:
-            # Kapat
-            menu_panel.place_forget()
-            menu_state["open"] = False
-            menu_btn.config(text="☰")
-        else:
-            # Aç
-            menu_panel.place(x=0, y=0, relheight=1.0)
-            menu_state["open"] = True
-            menu_btn.config(text="✕")
-        
-        # Hızlı ürünler yerleşimini güncelle (menü genişliği değiştiğinde)
-        # Birden fazla tetikleme ile güvenilirliği artır
-        try:
-            if hasattr(parent, '_relayout_quick_products'):
-                parent.update_idletasks()  # Layout güncellemesini zorla
-                parent.after(10, parent._relayout_quick_products)
-                parent.after(100, parent._relayout_quick_products)
-                parent.after(200, parent._relayout_quick_products)
-        except Exception:
-            pass
-    
-    menu_btn.config(command=toggle_menu)
-    
-    # Menü içeriği
-    menu_header = tk.Frame(menu_panel, bg="#20c997", height=60)
-    menu_header.pack(fill="x")
-    tk.Label(menu_header, text="📋 İşlem Menüsü", font=("Segoe UI", 14, "bold"),
-             bg="#20c997", fg="white").pack(side="left", padx=15, pady=15)
-    
-    menu_close_btn = tk.Button(menu_header, text="✕", font=("Segoe UI", 18),
-                               bg="#20c997", fg="white", relief="flat", padx=8,
-                               cursor="hand2", borderwidth=0, command=toggle_menu)
-    menu_close_btn.pack(side="right", padx=10)
-    
-    menu_content = tk.Frame(menu_panel, bg="#1a1a20")
-    menu_content.pack(fill="both", expand=True, padx=0, pady=0)
-    
-    # Menü öğeleri
-    def create_menu_item(parent, icon, text, command):
-        btn = tk.Button(parent, text=f"{icon}  {text}", font=("Segoe UI", 11),
-                       bg="#1a1a20", fg="white", relief="flat", anchor="w",
-                       padx=20, pady=12, cursor="hand2", borderwidth=0,
-                       activebackground="#2a2a35", activeforeground="white",
-                       command=command)
-        btn.pack(fill="x", pady=1)
-        
-        def on_enter(e):
-            btn.config(bg="#2a2a35")
-        def on_leave(e):
-            btn.config(bg="#1a1a20")
-        btn.bind("<Enter>", on_enter)
-        btn.bind("<Leave>", on_leave)
-        return btn
-    
-    # Menü öğelerini ekle
-    create_menu_item(menu_content, "📦", t('product_mgmt'), lambda: [toggle_menu(), mount_products(parent)])
-    create_menu_item(menu_content, "📊", t('stock_mgmt'), lambda: [toggle_menu(), mount_stok_giris(parent)])
-    create_menu_item(menu_content, "💼", t('account_mgmt_menu'), lambda: [toggle_menu(), mount_cariler(parent)])
-    create_menu_item(menu_content, "👥", t('users'), lambda: [toggle_menu(), mount_users(parent)])
-    create_menu_item(menu_content, "🛑", t('cancel_sale'), lambda: [toggle_menu(), mount_cancel_sales(parent)])
-    create_menu_item(menu_content, "🧾", t('receipts'), lambda: [toggle_menu(), mount_receipts(parent)])
-    create_menu_item(menu_content, "📈", t('reports'), lambda: [toggle_menu(), mount_reports(parent)])
-    
-    # Ana içerik (menü kapalıyken tam ekran)
-    content_container = tk.Frame(main_container, bg=BG_COLOR)
-    content_container.place(x=0, y=0, relwidth=1.0, relheight=1.0)
-    
     # Ana içerik (menü kapalıyken tam ekran)
     content_container = tk.Frame(main_container, bg=BG_COLOR)
     content_container.place(x=0, y=0, relwidth=1.0, relheight=1.0)
@@ -3680,7 +3596,7 @@ def open_main_window(role, username):
     menu_container.pack_propagate(False)
 
     # Sol menü daralt/genişlet durumu
-    menu_state = {"collapsed": True}
+    sidebar_state: dict = {"collapsed": True}
 
     # Sabit başlık (ikon + başlık + daralt butonu)
     header_bar = ttk.Frame(menu_container, style="Card.TFrame")
@@ -3954,48 +3870,100 @@ def open_main_window(role, username):
         mbtn(menu, "🧾 " + t('receipts'), lambda: mount_receipts(right_panel))
 
     # Menüyü daralt/genişlet
+    if "locked" not in sidebar_state:
+        sidebar_state["locked"] = False
+
     def apply_menu_collapse():
-        collapsed = menu_state["collapsed"]
+        collapsed = sidebar_state["collapsed"]
+        locked = sidebar_state.get("locked", False)
+        
+        target_w = 64 if collapsed else 280
+        
+        # Başlık ve buton güncellemeleri
         if collapsed:
-            w = 64
-            menu_container.config(width=w)
-            body.grid_columnconfigure(0, minsize=w) # Grid sütun genişliğini zorla
             header_label.config(text="📂")
-            collapse_btn.config(text="▶")
-            # Alt bölümleri kapat
-            close_all_sections()
-            # Scrollbar'ı gizle (dar alanda yer kaplamasın)
+            collapse_btn.config(text="▶", fg="white")
+            
+            # Scrollbar'ı gizle
             try:
                 menu_scrollbar.pack_forget()
-            except Exception:
-                pass
+            except: pass
+            
+            # Alt menüleri kapat
+            close_all_sections()
+            
+            # İkon moduna geç
             for meta in top_buttons:
                 try:
                     meta["btn"].config(text=meta["icon"], anchor="center", padx=0)
-                except Exception:
-                    pass
+                except: pass
+                
         else:
-            w = 280
-            menu_container.config(width=w)
-            body.grid_columnconfigure(0, minsize=w) # Grid sütun genişliğini zorla
             header_label.config(text="📂 " + t('action_menu'))
-            collapse_btn.config(text="◀")
-            # Scrollbar'ı geri getir
-            try:
-                menu_scrollbar.pack(side="right", fill="y")
-            except Exception:
-                pass
+            if locked:
+                collapse_btn.config(text="📌", fg="#e74c3c")
+            else:
+                collapse_btn.config(text="◀", fg="white")
+                
+            # Metinleri tam hale getir
             for meta in top_buttons:
                 try:
                     meta["btn"].config(text=meta["full"], anchor="w", padx=10)
-                except Exception:
-                    pass
+                except: pass
+                
+            # Scrollbar'ı geri getir
+            try:
+                menu_scrollbar.pack(side="right", fill="y")
+            except: pass
+
+        # Genişliği hemen uygula (Animasyonsuz)
+        menu_container.config(width=target_w)
+        body.grid_columnconfigure(0, minsize=target_w)
+        
+        # Varsa önceki animasyonu iptal et (temizlik için)
+        if "anim_id" in sidebar_state:
+            try:
+                main.after_cancel(sidebar_state["anim_id"])
+                del sidebar_state["anim_id"]
+            except: pass
 
     def toggle_menu_collapse():
-        menu_state["collapsed"] = not menu_state["collapsed"]
+        # Butona basınca kilit durumunu değiştir
+        sidebar_state["locked"] = not sidebar_state.get("locked", False)
+        
+        if sidebar_state["locked"]:
+            sidebar_state["collapsed"] = False # Kilitlenince aç
+        else:
+            # Kilidi açınca hemen kapatma, mouse çıkınca kapanır
+            pass
+            
+        apply_menu_collapse()
+
+    def on_menu_enter(event):
+        if sidebar_state["collapsed"]:
+            sidebar_state["collapsed"] = False
+            apply_menu_collapse()
+
+    def on_menu_leave(event):
+        if sidebar_state.get("locked", False):
+            return
+            
+        try:
+            x, y = main.winfo_pointerxy()
+            widget = main.winfo_containing(x, y)
+            # Eğer mouse hala menü üzerindeyse kapatma
+            if widget == menu_container or str(widget).startswith(str(menu_container)):
+                return
+        except: pass
+        
+        sidebar_state["collapsed"] = True
         apply_menu_collapse()
 
     collapse_btn.config(command=toggle_menu_collapse)
+    
+    # Hover olaylarını bağla
+    menu_container.bind("<Enter>", on_menu_enter)
+    menu_container.bind("<Leave>", on_menu_leave)
     
     # Başlangıçta menü durumunu uygula
     apply_menu_collapse()
