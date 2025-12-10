@@ -8,13 +8,14 @@ def insert_line(conn, cursor,
                 price: float,
                 total: float,
                 payment_method: str = 'cash',
-                canceled: int = 0) -> None:
+                canceled: int = 0,
+                warehouse_id: int = None) -> None:
     cursor.execute(
         """
-        INSERT INTO sales(fis_id,product_name,quantity,price,total,payment_method,canceled,created_at)
-        VALUES(?,?,?,?,?,?,?,datetime('now','localtime'))
+        INSERT INTO sales(fis_id,product_name,quantity,price,total,payment_method,canceled,warehouse_id,created_at)
+        VALUES(?,?,?,?,?,?,?,?,datetime('now','localtime'))
         """,
-    (fis_id, product_name, float(quantity), float(price), float(total), payment_method, int(canceled))
+    (fis_id, product_name, float(quantity), float(price), float(total), payment_method, int(canceled), warehouse_id)
     )
     conn.commit()
 

@@ -65,18 +65,30 @@ def mount_products(parent, conn, cursor, t,
     stock_var = tk.StringVar()
     e_stock = ttk.Entry(right, textvariable=stock_var, width=26, font=("Segoe UI", 11, "bold"))
     e_stock.grid(row=10, column=0, sticky="ew", padx=10, ipady=4)
+    
+    # Depo Seçimi (Sadece yeni ürün eklerken aktif olabilir veya stok girişi için)
+    ttk.Label(right, text=t('warehouse'), font=("Segoe UI", 9, "bold")).grid(row=11, column=0, sticky="w", padx=10, pady=(12,4))
+    from services import warehouse_service as wh_svc
+    warehouses = wh_svc.list_warehouses(cursor)
+    wh_map = {w[1]: w[0] for w in warehouses}
+    wh_names = list(wh_map.keys())
+    
+    wh_var = tk.StringVar()
+    wh_cb = ttk.Combobox(right, textvariable=wh_var, values=wh_names, state="readonly", width=24)
+    wh_cb.grid(row=12, column=0, sticky="ew", padx=10, ipady=2)
+    if wh_names: wh_cb.set(wh_names[0])
 
     # Birim seçimi (adet | kg)
-    ttk.Label(right, text=t('unit'), font=("Segoe UI", 9, "bold")).grid(row=11, column=0, sticky="w", padx=10, pady=(12,4))
+    ttk.Label(right, text=t('unit'), font=("Segoe UI", 9, "bold")).grid(row=13, column=0, sticky="w", padx=10, pady=(12,4))
     unit_var = tk.StringVar(value='adet')
     unit_cb = ttk.Combobox(right, textvariable=unit_var, values=[t('adet'), t('kg')], state="readonly", width=24)
-    unit_cb.grid(row=12, column=0, sticky="ew", padx=10, ipady=2)
+    unit_cb.grid(row=14, column=0, sticky="ew", padx=10, ipady=2)
 
     # Kategori seçimi
-    ttk.Label(right, text=t('category'), font=("Segoe UI", 9, "bold")).grid(row=13, column=0, sticky="w", padx=10, pady=(12,4))
+    ttk.Label(right, text=t('category'), font=("Segoe UI", 9, "bold")).grid(row=15, column=0, sticky="w", padx=10, pady=(12,4))
     category_var = tk.StringVar()
     category_cb = ttk.Combobox(right, textvariable=category_var, state="readonly", width=24)
-    category_cb.grid(row=14, column=0, sticky="ew", padx=10, ipady=2)
+    category_cb.grid(row=16, column=0, sticky="ew", padx=10, ipady=2)
     
     # Kategori listesini yükle
     def load_categories():
@@ -192,6 +204,31 @@ def mount_products(parent, conn, cursor, t,
         
         # Kategoriyi yükle
         category_var.set(str(category_cur) if category_cur else "-")
+        
+        # Depo bilgisini yükle (Varsayılan olarak en çok stoğu olan depoyu seç)
+        try:
+            from services import warehouse_service as wh_svc
+            stocks = wh_svc.repo.list_all_stocks(cursor) # Bu tüm stokları getirir, verimsiz olabilir ama şimdilik idare eder
+            # Daha iyi yöntem: product_id'ye göre stokları getir
+            cursor.execute("""
+                SELECT w.name, ws.quantity 
+                FROM warehouse_stocks ws
+                JOIN warehouses w ON ws.warehouse_id = w.id
+                WHERE ws.product_id = ?
+                ORDER BY ws.quantity DESC
+                LIMIT 1
+            """, (real_pid,))
+            wh_res = cursor.fetchone()
+            if wh_res:
+                wh_var.set(wh_res[0])
+                # Stok miktarını da o depodaki miktar olarak güncellemek mantıklı olabilir
+                # Ancak listedeki stok toplam stok mu yoksa depo stoğu mu? Şu an listedeki 'products.stock'
+                # Kullanıcı "depo alanı aktif olarak mevcut deposunu göstersin" dedi.
+            else:
+                # Stok yoksa veya depo kaydı yoksa varsayılanı seç
+                if wh_names: wh_cb.current(0)
+        except Exception:
+            pass
 
     tree.bind('<<TreeviewSelect>>', populate_from_selection)
 
@@ -200,8 +237,13 @@ def mount_products(parent, conn, cursor, t,
         if not res:
             return
         name, barcode, sale_price, stock, buy_price, u, cat_id = res
+        
+        # Depo ID
+        wh_name = wh_var.get()
+        wh_id = wh_map.get(wh_name) if wh_name else None
+        
         try:
-            product_svc.add_product(conn, cursor, name, barcode, sale_price, stock, buy_price, unit=u, category_id=cat_id)
+            product_svc.add_product(conn, cursor, name, barcode, sale_price, stock, buy_price, unit=u, category_id=cat_id, warehouse_id=wh_id)
             load(search_var.get()); clear_form()
             load_categories()  # Yenile
         except sqlite3.IntegrityError:

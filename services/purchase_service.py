@@ -2,15 +2,16 @@
 from repositories import purchase_repository as repo
 from repositories import product_repository as prod_repo
 from repositories import cari_repository as cari_repo
+from services import warehouse_service as wh_svc
 
-def create_purchase(conn, cursor, supplier_id, doc_type, doc_number, doc_date, items, description=""):
+def create_purchase(conn, cursor, supplier_id, doc_type, doc_number, doc_date, items, description="", warehouse_id=None):
     """
     Satın alma işlemini kaydeder.
     items: list of dict {'product_id': int, 'name': str, 'qty': float, 'price': float}
     """
     # 1. Belgeyi oluştur
     total_amount = sum(item['qty'] * item['price'] for item in items)
-    doc_id = repo.add_document(conn, cursor, supplier_id, doc_type, doc_number, doc_date, total_amount, description)
+    doc_id = repo.add_document(conn, cursor, supplier_id, doc_type, doc_number, doc_date, total_amount, description, warehouse_id)
     
     # 2. Kalemleri ekle ve stok güncelle
     for item in items:
@@ -26,6 +27,13 @@ def create_purchase(conn, cursor, supplier_id, doc_type, doc_number, doc_date, i
                 new_stock = current_stock + item['qty']
                 prod_repo.update_stock(conn, cursor, item['product_id'], new_stock)
                 
+                # Depo stoğunu güncelle
+                if warehouse_id:
+                    current_wh_stock = wh_svc.repo.get_stock(cursor, warehouse_id, item['product_id'])
+                    wh_svc.repo.update_stock(cursor, warehouse_id, item['product_id'], current_wh_stock + item['qty'])
+                    # Hareket kaydı
+                    wh_svc.repo.add_movement(cursor, None, warehouse_id, item['product_id'], item['qty'], f"Satın Alma: {doc_number}", 1) # User ID 1 (Admin)
+
                 # Alış fiyatını güncelle (isteğe bağlı, son alış fiyatı)
                 if item['price'] > 0:
                     prod_repo.update_buy_price(conn, cursor, item['product_id'], item['price'])

@@ -173,6 +173,16 @@ def _mount_purchase_screen(parent, doc_type):
     e_date = ttk.Entry(info_frame); e_date.insert(0, datetime.now().strftime("%Y-%m-%d"))
     e_date.grid(row=0, column=5, padx=10, pady=10)
     
+    # Depo Seçimi
+    ttk.Label(info_frame, text=t('warehouse')).grid(row=0, column=6, padx=10, pady=10)
+    from services import warehouse_service as wh_svc
+    warehouses = wh_svc.list_warehouses(cursor)
+    wh_map = {w[1]: w[0] for w in warehouses}
+    wh_names = list(wh_map.keys())
+    cb_warehouse = ttk.Combobox(info_frame, values=wh_names, state="readonly", width=20)
+    cb_warehouse.grid(row=0, column=7, padx=10, pady=10)
+    if wh_names: cb_warehouse.set(wh_names[0])
+    
     # Orta: Ürün Ekleme
     add_frame = ttk.Frame(content, style="Card.TFrame"); add_frame.pack(fill="x", pady=(0,10))
     
@@ -300,8 +310,11 @@ def _mount_purchase_screen(parent, doc_type):
         doc_no = e_doc_no.get().strip()
         doc_date = e_date.get().strip()
         
+        wh_name = cb_warehouse.get()
+        wh_id = wh_map.get(wh_name) if wh_name else None
+        
         try:
-            purchase_svc.create_purchase(conn, cursor, supplier_id, doc_type, doc_no, doc_date, items_data)
+            purchase_svc.create_purchase(conn, cursor, supplier_id, doc_type, doc_no, doc_date, items_data, warehouse_id=wh_id)
             messagebox.showinfo(t('success'), t('saved'))
             items_data.clear()
             refresh_list()
@@ -847,12 +860,22 @@ def _mount_stok_islem(parent, mode: str = "in"):
     body.grid_columnconfigure(1, weight=1)
 
     from services import product_service as ps
+    from services import warehouse_service as wh_svc
     products = ps.list_products(cursor)
     names = [p[1] for p in products]
 
     ttk.Label(body, text=t('product')+":", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=8, pady=8, sticky="e")
     cb = ttk.Combobox(body, values=names, width=40, state="readonly", font=("Segoe UI", 10))
     cb.grid(row=0, column=1, padx=8, pady=8, sticky="ew")
+
+    # Depo Seçimi
+    ttk.Label(body, text="Depo:", font=("Segoe UI", 10, "bold")).grid(row=0, column=2, padx=8, pady=8, sticky="e")
+    warehouses = wh_svc.list_warehouses(cursor)
+    wh_map = {w[1]: w[0] for w in warehouses}
+    wh_names = list(wh_map.keys())
+    wh_cb = ttk.Combobox(body, values=wh_names, width=20, state="readonly", font=("Segoe UI", 10))
+    wh_cb.grid(row=0, column=3, padx=8, pady=8, sticky="ew")
+    if wh_names: wh_cb.set(wh_names[0])
 
     ttk.Label(body, text=t('stock')+":", font=("Segoe UI", 10)).grid(row=1, column=0, padx=8, pady=6, sticky="e")
     lbl_stock = ttk.Label(body, text="-", font=("Segoe UI", 10, "bold")); lbl_stock.grid(row=1, column=1, padx=8, pady=6, sticky="w")
@@ -865,9 +888,12 @@ def _mount_stok_islem(parent, mode: str = "in"):
 
     def refresh():
         name = cb.get()
+        w_name = wh_cb.get()
+        wh_id = wh_map.get(w_name)
+        
         if not name:
             lbl_stock.config(text="-"); lbl_unit.config(text="-"); return
-        info = ps.get_price_stock_by_name(cursor, name)
+        info = ps.get_price_stock_by_name(cursor, name, wh_id)
         if info:
             _price, stock, unit = info
             lbl_unit.config(text=str(unit))
@@ -877,33 +903,37 @@ def _mount_stok_islem(parent, mode: str = "in"):
                 lbl_stock.config(text=str(int(float(stock))))
 
     cb.bind("<<ComboboxSelected>>", lambda *_: refresh())
+    wh_cb.bind("<<ComboboxSelected>>", lambda *_: refresh())
 
     def apply_change():
         name = cb.get().strip()
+        w_name = wh_cb.get()
+        wh_id = wh_map.get(w_name)
+        
         if not name:
             return messagebox.showwarning(t('warning'), t('select_item'))
         qty = parse_float_safe(e_qty.get(), None)
         if qty is None or qty < 0:
             return messagebox.showwarning(t('warning'), t('enter_valid'))
-        info2 = ps.get_price_stock_by_name(cursor, name)
+        info2 = ps.get_price_stock_by_name(cursor, name, wh_id)
         if not info2:
             return messagebox.showerror(t('error'), t('product_not_found'))
         price, stock, unit = info2
         if mode=="in":
-            ps.increment_stock(conn, cursor, name, float(qty))
+            ps.increment_stock(conn, cursor, name, float(qty), warehouse_id=wh_id)
         elif mode=="out":
             if float(qty) > float(stock):
                 return messagebox.showwarning(t('warning'), t('insufficient_stock').format(stock=stock))
-            ps.decrement_stock(conn, cursor, name, float(qty))
+            ps.decrement_stock(conn, cursor, name, float(qty), warehouse_id=wh_id)
         else:  # count
             # set stock to target by adjusting delta
             target = float(qty)
             delta = target - float(stock)
             if abs(delta) > 1e-9:
                 if delta > 0:
-                    ps.increment_stock(conn, cursor, name, delta)
+                    ps.increment_stock(conn, cursor, name, delta, warehouse_id=wh_id)
                 else:
-                    ps.decrement_stock(conn, cursor, name, -delta)
+                    ps.decrement_stock(conn, cursor, name, -delta, warehouse_id=wh_id)
         refresh(); messagebox.showinfo(t('success'), t('done'))
 
     btn_text = t('save') if mode=="count" else t('apply') if t('apply')!= 'apply' else t('save')
@@ -1156,7 +1186,7 @@ def mount_masraf_raporu(parent):
     scroll.pack(side="right", fill="y")
     tree.pack(side="left", fill="both", expand=True)
     
-    total_lbl = ttk.Label(content, text="Total: 0.00 ₺", font=("Segoe UI", 12, "bold"))
+    total_lbl = ttk.Label(content, text=f"{t('total')}: 0.00", font=("Segoe UI", 12, "bold"))
     total_lbl.pack(pady=10)
     
     def load_data():
@@ -1166,108 +1196,723 @@ def mount_masraf_raporu(parent):
             # ex: (id, title, amount, cat, desc, date)
             tree.insert("", "end", text=str(ex[0]), values=(idx, ex[1], ex[2], ex[3], ex[4], ex[5]))
             total += float(ex[2])
-        total_lbl.config(text=f"Total: {total:.2f} ₺")
+        total_lbl.config(text=f"{t('total')}: {total:.2f}")
     load_data()
 
-def mount_tedarikci_listesi(parent):
-    # Tedarikçi Listesi (Cari Tipi: Alacaklı olanlar)
-    from services import cari_service as cs
+def mount_personel_vardiya(parent):
+    from services import personnel_service as ps
+    from services import users_service as us
+    
     for w in parent.winfo_children(): w.destroy()
     
     header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
-    ttk.Label(header, text="🚚 " + t('supplier_list'), style="Header.TLabel").pack(side="left", padx=8)
+    ttk.Label(header, text="🕒 " + t('shift_mgmt'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Sol: Vardiya Listesi
+    left_panel = ttk.Frame(content, style="Card.TFrame"); left_panel.pack(side="left", fill="both", expand=True, padx=(0,8))
+    
+    cols = ("user", "start", "end", "note")
+    tree = ttk.Treeview(left_panel, columns=cols, show="headings")
+    tree.heading("user", text=t('username')); tree.column("user", width=100)
+    tree.heading("start", text=t('start_time')); tree.column("start", width=150)
+    tree.heading("end", text=t('end_time')); tree.column("end", width=150)
+    tree.heading("note", text=t('note')); tree.column("note", width=150)
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    # Sağ: İşlemler
+    right_panel = ttk.Frame(content, style="Card.TFrame", width=300); right_panel.pack(side="right", fill="y")
+    right_panel.pack_propagate(False)
+    
+    ttk.Label(right_panel, text=t('actions'), style="Header.TLabel").pack(pady=10)
+    
+    # Kullanıcı Seçimi
+    ttk.Label(right_panel, text=t('username')).pack(anchor="w", padx=10)
+    users = us.list_users(cursor)
+    user_map = {u[1]: u[0] for u in users} # name -> id
+    user_names = list(user_map.keys())
+    
+    cb_user = ttk.Combobox(right_panel, values=user_names, state="readonly")
+    cb_user.pack(fill="x", padx=10, pady=(0,10))
+    
+    ttk.Label(right_panel, text=t('note')).pack(anchor="w", padx=10)
+    e_note = ttk.Entry(right_panel); e_note.pack(fill="x", padx=10, pady=(0,10))
+    
+    lbl_status = ttk.Label(right_panel, text="", font=("Segoe UI", 9, "bold"))
+    lbl_status.pack(pady=5)
+    
+    btn_action = ttk.Button(right_panel, text="-")
+    btn_action.pack(fill="x", padx=10, pady=10)
+    
+    def load_shifts():
+        for i in tree.get_children(): tree.delete(i)
+        shifts = ps.list_shifts(cursor)
+        for s in shifts:
+            # s: (id, username, start, end, note)
+            tree.insert("", "end", text=str(s[0]), values=(s[1], s[2], s[3] or "-", s[4]))
+            
+    def check_status(*args):
+        uname = cb_user.get()
+        if not uname:
+            lbl_status.config(text="")
+            btn_action.config(state="disabled", text="-")
+            return
+            
+        uid = user_map[uname]
+        active = ps.get_active_shift(cursor, uid)
+        
+        if active:
+            # active: (id, start, note)
+            lbl_status.config(text=f"🟢 {t('working')}\n{active[1]}", foreground="green")
+            btn_action.config(state="normal", text=t('end_shift'), command=lambda: do_end_shift(active[0]))
+        else:
+            lbl_status.config(text=f"🔴 {t('not_working')}", foreground="red")
+            btn_action.config(state="normal", text=t('start_shift'), command=lambda: do_start_shift(uid))
+            
+    def do_start_shift(uid):
+        note = e_note.get().strip()
+        ps.start_shift(conn, cursor, uid, note)
+        messagebox.showinfo(t('success'), t('shift_started'))
+        e_note.delete(0, tk.END)
+        load_shifts()
+        check_status()
+        
+    def do_end_shift(sid):
+        ps.end_shift(conn, cursor, sid)
+        messagebox.showinfo(t('success'), t('shift_ended'))
+        load_shifts()
+        check_status()
+        
+    cb_user.bind("<<ComboboxSelected>>", check_status)
+    if user_names: cb_user.set(user_names[0]); check_status()
+    
+    load_shifts()
+
+def mount_personel_maas(parent):
+    from services import personnel_service as ps
+    from services import users_service as us
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="💳 " + t('salary_advance'), style="Header.TLabel").pack(side="left", padx=8)
     
     content = ttk.Frame(parent); content.pack(fill="both", expand=True, padx=12, pady=8)
     
     # Sol: Liste
     left_panel = ttk.Frame(content, style="Card.TFrame"); left_panel.pack(side="left", fill="both", expand=True, padx=(0,8))
     
-    columns = ("no", "name", "phone", "balance")
-    tree = ttk.Treeview(left_panel, columns=columns, show="headings", height=15)
-    tree.heading("no", text="No"); tree.column("no", width=50, anchor="center")
-    tree.heading("name", text=t('cari_name')); tree.column("name", width=200)
-    tree.heading("phone", text=t('phone')); tree.column("phone", width=120)
-    tree.heading("balance", text=t('balance')); tree.column("balance", width=100)
+    cols = ("user", "amount", "type", "date", "desc")
+    tree = ttk.Treeview(left_panel, columns=cols, show="headings")
+    tree.heading("user", text=t('username')); tree.column("user", width=100)
+    tree.heading("amount", text=t('amount')); tree.column("amount", width=80)
+    tree.heading("type", text=t('type')); tree.column("type", width=80)
+    tree.heading("date", text=t('date')); tree.column("date", width=120)
+    tree.heading("desc", text=t('description')); tree.column("desc", width=150)
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
     
-    scroll = ttk.Scrollbar(left_panel, orient="vertical", command=tree.yview)
-    tree.configure(yscrollcommand=scroll.set)
-    scroll.pack(side="right", fill="y")
-    tree.pack(side="left", fill="both", expand=True)
-    
-    # Sağ: Ekleme Formu
+    # Sağ: Ekleme
     right_panel = ttk.Frame(content, style="Card.TFrame", width=300); right_panel.pack(side="right", fill="y")
     right_panel.pack_propagate(False)
     
+    ttk.Label(right_panel, text=t('add_payment'), style="Header.TLabel").pack(pady=10)
+    
+    ttk.Label(right_panel, text=t('username')).pack(anchor="w", padx=10)
+    users = us.list_users(cursor)
+    user_map = {u[1]: u[0] for u in users}
+    user_names = list(user_map.keys())
+    cb_user = ttk.Combobox(right_panel, values=user_names, state="readonly")
+    cb_user.pack(fill="x", padx=10, pady=(0,10))
+    
+    ttk.Label(right_panel, text=t('type')).pack(anchor="w", padx=10)
+    cb_type = ttk.Combobox(right_panel, values=[t('salary'), t('advance'), t('bonus')], state="readonly")
+    cb_type.set(t('salary'))
+    cb_type.pack(fill="x", padx=10, pady=(0,10))
+    
+    ttk.Label(right_panel, text=t('amount')).pack(anchor="w", padx=10)
+    e_amount = ttk.Entry(right_panel); e_amount.pack(fill="x", padx=10, pady=(0,10))
+    
+    ttk.Label(right_panel, text=t('description')).pack(anchor="w", padx=10)
+    e_desc = ttk.Entry(right_panel); e_desc.pack(fill="x", padx=10, pady=(0,10))
+    
+    def load_payments():
+        for i in tree.get_children(): tree.delete(i)
+        payments = ps.list_payments(cursor)
+        for p in payments:
+            # p: (id, username, amount, type, date, desc)
+            tree.insert("", "end", text=str(p[0]), values=(p[1], f"{p[2]:.2f}", p[3], p[4], p[5]))
+            
+    def save_payment():
+        uname = cb_user.get()
+        if not uname: return
+        uid = user_map[uname]
+        
+        try:
+            amt = float(e_amount.get())
+        except ValueError:
+            messagebox.showerror(t('error'), t('invalid_amount'))
+            return
+            
+        ptype = cb_type.get()
+        desc = e_desc.get().strip()
+        date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        ps.add_payment(conn, cursor, uid, amt, ptype, date, desc)
+        messagebox.showinfo(t('success'), t('saved'))
+        e_amount.delete(0, tk.END); e_desc.delete(0, tk.END)
+        load_payments()
+        
+    tk.Button(right_panel, text="💾 " + t('save'), command=save_payment, bg=ACCENT, fg="white", relief="flat").pack(fill="x", padx=10, pady=10)
+    
+    load_payments()
+
+def mount_depo_listesi(parent):
+    from services import warehouse_service as ws
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="🏬 " + t('warehouse_list'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Sol: Depo Listesi
+    left_panel = ttk.Frame(content, style="Card.TFrame"); left_panel.pack(side="left", fill="both", expand=True, padx=(0,8))
+    
+    cols = ("name", "location")
+    tree = ttk.Treeview(left_panel, columns=cols, show="headings")
+    tree.heading("name", text=t('name')); tree.column("name", width=150)
+    tree.heading("location", text=t('address')); tree.column("location", width=200)
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    # Sağ: Ekleme ve Stok Detayı
+    right_panel = ttk.Frame(content, style="Card.TFrame", width=350); right_panel.pack(side="right", fill="y")
+    right_panel.pack_propagate(False)
+    
+    # Ekleme Bölümü
     ttk.Label(right_panel, text=t('add'), style="Header.TLabel").pack(pady=10)
     
-    ttk.Label(right_panel, text=t('cari_name')).pack(anchor="w", padx=10)
+    ttk.Label(right_panel, text=t('name')).pack(anchor="w", padx=10)
     e_name = ttk.Entry(right_panel); e_name.pack(fill="x", padx=10, pady=(0,10))
     
-    ttk.Label(right_panel, text=t('phone')).pack(anchor="w", padx=10)
-    e_phone = ttk.Entry(right_panel); e_phone.pack(fill="x", padx=10, pady=(0,10))
-    
     ttk.Label(right_panel, text=t('address')).pack(anchor="w", padx=10)
-    e_addr = ttk.Entry(right_panel); e_addr.pack(fill="x", padx=10, pady=(0,10))
+    e_loc = ttk.Entry(right_panel); e_loc.pack(fill="x", padx=10, pady=(0,10))
     
-    def load_suppliers():
+    def load_warehouses():
         for i in tree.get_children(): tree.delete(i)
-        # Sadece alacaklıları (tedarikçileri) filtrele
-        all_caris = cs.list_all(cursor)
-        idx = 1
-        for c in all_caris:
-            # c: (id, name, phone, address, balance, cari_type)
-            if c[5] == 'alacakli':
-                tree.insert("", "end", text=str(c[0]), values=(idx, c[1], c[2], f"{c[4]:.2f}"))
-                idx += 1
-                
-    def save_supplier():
+        warehouses = ws.list_warehouses(cursor)
+        for w in warehouses:
+            # w: (id, name, location, created_at)
+            tree.insert("", "end", text=str(w[0]), values=(w[1], w[2]))
+            
+    def save_warehouse():
         name = e_name.get().strip()
-        phone = e_phone.get().strip()
-        addr = e_addr.get().strip()
+        loc = e_loc.get().strip()
+        if not name: return
         try:
-            cs.add_cari(conn, cursor, name, phone, addr, 0.0, "alacakli")
+            ws.add_warehouse(conn, cursor, name, loc)
             messagebox.showinfo(t('success'), t('saved'))
-            e_name.delete(0, tk.END); e_phone.delete(0, tk.END); e_addr.delete(0, tk.END)
-            load_suppliers()
+            e_name.delete(0, tk.END); e_loc.delete(0, tk.END)
+            load_warehouses()
         except Exception as e:
             messagebox.showerror(t('error'), str(e))
             
-    tk.Button(right_panel, text="💾 " + t('save'), command=save_supplier, bg=ACCENT, fg="white", relief="flat", padx=10, pady=5).pack(fill="x", padx=10, pady=5)
+    tk.Button(right_panel, text="💾 " + t('save'), command=save_warehouse, bg=ACCENT, fg="white", relief="flat").pack(fill="x", padx=10, pady=10)
     
-    load_suppliers()
-
-def mount_personel_vardiya(parent):
-    mount_placeholder(parent, "🕒", t('shift_mgmt'), t('coming_soon'))
-
-def mount_personel_maas(parent):
-    mount_placeholder(parent, "💳", t('salary_advance'), t('coming_soon'))
-
-def mount_depo_listesi(parent):
-    mount_placeholder(parent, "🏬", t('warehouse_list'), t('coming_soon'))
+    # Stok Detayı Bölümü
+    ttk.Separator(right_panel, orient="horizontal").pack(fill="x", padx=10, pady=10)
+    ttk.Label(right_panel, text=t('stock_status'), style="Header.TLabel").pack(pady=5)
+    
+    stock_tree = ttk.Treeview(right_panel, columns=("prod", "qty"), show="headings", height=10)
+    stock_tree.heading("prod", text=t('product')); stock_tree.column("prod", width=150)
+    stock_tree.heading("qty", text=t('quantity')); stock_tree.column("qty", width=80)
+    stock_tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    def on_select(event):
+        sel = tree.selection()
+        if not sel: return
+        wid = tree.item(sel[0])["text"]
+        
+        for i in stock_tree.get_children(): stock_tree.delete(i)
+        stocks = ws.list_warehouse_stocks(cursor, wid)
+        for s in stocks:
+            # s: (name, quantity, unit)
+            stock_tree.insert("", "end", values=(s[0], f"{s[1]} {s[2]}"))
+            
+    tree.bind("<<TreeviewSelect>>", on_select)
+    load_warehouses()
 
 def mount_depo_transfer(parent):
-    mount_placeholder(parent, "🔄", t('transfer'), t('coming_soon'))
+    from services import warehouse_service as ws
+    from services import product_service as ps
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="🔄 " + t('transfer'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Form
+    f_form = ttk.Frame(content); f_form.pack(padx=20, pady=20)
+    
+    warehouses = ws.list_warehouses(cursor)
+    wh_map = {w[1]: w[0] for w in warehouses}
+    wh_names = list(wh_map.keys())
+    
+    # Kaynak Depo
+    ttk.Label(f_form, text=t('source_warehouse')).grid(row=0, column=0, padx=10, pady=10, sticky="e")
+    cb_source = ttk.Combobox(f_form, values=wh_names, state="readonly", width=30)
+    cb_source.grid(row=0, column=1, padx=10, pady=10)
+    
+    # Hedef Depo
+    ttk.Label(f_form, text=t('target_warehouse')).grid(row=1, column=0, padx=10, pady=10, sticky="e")
+    cb_target = ttk.Combobox(f_form, values=wh_names, state="readonly", width=30)
+    cb_target.grid(row=1, column=1, padx=10, pady=10)
+    
+    # Ürün Seçimi
+    ttk.Label(f_form, text=t('product')).grid(row=2, column=0, padx=10, pady=10, sticky="e")
+    
+    # Basit ürün seçimi için combobox (çok ürün varsa yavaş olabilir ama şimdilik yeterli)
+    all_prods = ps.list_products(cursor)
+    prod_map = {f"{p[1]} ({p[2]})": p[0] for p in all_prods} # Name (Barcode) -> ID
+    prod_names = list(prod_map.keys())
+    
+    cb_prod = ttk.Combobox(f_form, values=prod_names, width=30)
+    cb_prod.grid(row=2, column=1, padx=10, pady=10)
+    
+    # Miktar
+    ttk.Label(f_form, text=t('quantity')).grid(row=3, column=0, padx=10, pady=10, sticky="e")
+    e_qty = ttk.Entry(f_form, width=32)
+    e_qty.grid(row=3, column=1, padx=10, pady=10)
+    
+    # Açıklama
+    ttk.Label(f_form, text=t('description')).grid(row=4, column=0, padx=10, pady=10, sticky="e")
+    e_desc = ttk.Entry(f_form, width=32)
+    e_desc.grid(row=4, column=1, padx=10, pady=10)
+    
+    def do_transfer():
+        s_name = cb_source.get()
+        t_name = cb_target.get()
+        p_name = cb_prod.get()
+        qty_str = e_qty.get()
+        desc = e_desc.get()
+        
+        if not (s_name and t_name and p_name and qty_str):
+            messagebox.showwarning(t('warning'), t('fill_all_fields'))
+            return
+            
+        if s_name == t_name:
+            messagebox.showerror(t('error'), "Kaynak ve hedef depo aynı olamaz!")
+            return
+            
+        try:
+            qty = float(qty_str)
+            sid = wh_map[s_name]
+            tid = wh_map[t_name]
+            pid = prod_map[p_name]
+            
+            # User ID şimdilik 1 (admin) varsayalım veya global user'dan alalım
+            # main.py'de global 'current_user' var mı? Yoksa 1 gönderelim.
+            # Kullanıcı login olduğunda user_id saklanmalı. Şimdilik 1.
+            uid = 1 
+            
+            ws.transfer_stock(conn, cursor, sid, tid, pid, qty, desc, uid)
+            messagebox.showinfo(t('success'), t('transfer_success'))
+            e_qty.delete(0, tk.END); e_desc.delete(0, tk.END)
+            
+        except ValueError as ve:
+            messagebox.showerror(t('error'), str(ve))
+        except Exception as e:
+            messagebox.showerror(t('error'), str(e))
+            
+    tk.Button(f_form, text="🚀 " + t('transfer'), command=do_transfer, bg=ACCENT, fg="white", relief="flat", padx=20, pady=10).grid(row=5, column=1, pady=20)
 
 def mount_depo_hareket(parent):
-    mount_placeholder(parent, "📦", t('warehouse_movements'), t('coming_soon'))
+    from services import warehouse_service as ws
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="📦 " + t('warehouse_movements'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    cols = ("date", "source", "target", "product", "qty", "desc", "user")
+    tree = ttk.Treeview(content, columns=cols, show="headings")
+    
+    tree.heading("date", text=t('date')); tree.column("date", width=120)
+    tree.heading("source", text=t('source_warehouse')); tree.column("source", width=120)
+    tree.heading("target", text=t('target_warehouse')); tree.column("target", width=120)
+    tree.heading("product", text=t('product')); tree.column("product", width=150)
+    tree.heading("qty", text=t('quantity')); tree.column("qty", width=80)
+    tree.heading("desc", text=t('description')); tree.column("desc", width=150)
+    tree.heading("user", text=t('username')); tree.column("user", width=100)
+    
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    moves = ws.list_movements(cursor)
+    for m in moves:
+        # m: (id, source, target, product, qty, date, desc, username)
+        tree.insert("", "end", text=str(m[0]), values=(m[5], m[1] or "-", m[2] or "-", m[3], m[4], m[6], m[7]))
+
+def mount_depo_stok_listesi(parent):
+    from services import warehouse_service as ws
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="📦 " + t('stock_list'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    # Filtreler
+    filter_frame = ttk.Frame(header); filter_frame.pack(side="right", padx=8)
+    
+    ttk.Label(filter_frame, text=t('warehouse') + ":").pack(side="left", padx=5)
+    
+    warehouses = ws.list_warehouses(cursor)
+    wh_map = {w[1]: w[0] for w in warehouses}
+    wh_names = [t('all')] + list(wh_map.keys())
+    
+    cb_wh = ttk.Combobox(filter_frame, values=wh_names, state="readonly", width=20)
+    cb_wh.set(t('all'))
+    cb_wh.pack(side="left", padx=5)
+    
+    ttk.Label(filter_frame, text=t('search') + ":").pack(side="left", padx=5)
+    e_search = ttk.Entry(filter_frame, width=20)
+    e_search.pack(side="left", padx=5)
+    
+    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    cols = ("warehouse", "product", "qty", "unit")
+    tree = ttk.Treeview(content, columns=cols, show="headings")
+    
+    tree.heading("warehouse", text=t('warehouse')); tree.column("warehouse", width=150)
+    tree.heading("product", text=t('product')); tree.column("product", width=200)
+    tree.heading("qty", text=t('quantity')); tree.column("qty", width=100, anchor="center")
+    tree.heading("unit", text=t('unit')); tree.column("unit", width=80, anchor="center")
+    
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    def load_stocks(event=None):
+        for i in tree.get_children(): tree.delete(i)
+        
+        selected_wh = cb_wh.get()
+        search_txt = e_search.get().lower()
+        
+        if selected_wh == t('all'):
+            stocks = ws.list_all_stocks(cursor)
+            # stocks: (wh_name, prod_name, qty, unit)
+        else:
+            wh_id = wh_map.get(selected_wh)
+            if not wh_id: return
+            raw_stocks = ws.list_warehouse_stocks(cursor, wh_id)
+            # raw_stocks: (prod_name, qty, unit)
+            stocks = [(selected_wh, s[0], s[1], s[2]) for s in raw_stocks]
+            
+        for s in stocks:
+            wh_name, p_name, qty, unit = s
+            if search_txt and search_txt not in p_name.lower():
+                continue
+            tree.insert("", "end", values=(wh_name, p_name, f"{qty}", unit))
+            
+    cb_wh.bind("<<ComboboxSelected>>", load_stocks)
+    e_search.bind("<KeyRelease>", load_stocks)
+    
+    load_stocks()
+
 
 def mount_kasa_hareket(parent):
-    mount_placeholder(parent, "💵", t('cash_movements'), t('coming_soon'))
+    from services import cash_service as cs
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="💵 " + t('cash_movements'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    # Filtreler
+    filter_frame = ttk.Frame(header); filter_frame.pack(side="right", padx=8)
+    
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    ttk.Label(filter_frame, text=t('start_date')).pack(side="left", padx=5)
+    e_start = ttk.Entry(filter_frame, width=12); e_start.pack(side="left", padx=5)
+    e_start.insert(0, today)
+    
+    ttk.Label(filter_frame, text=t('end_date')).pack(side="left", padx=5)
+    e_end = ttk.Entry(filter_frame, width=12); e_end.pack(side="left", padx=5)
+    e_end.insert(0, today)
+    
+    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    cols = ("date", "type", "desc", "amount", "direction")
+    tree = ttk.Treeview(content, columns=cols, show="headings")
+    
+    tree.heading("date", text=t('date')); tree.column("date", width=120)
+    tree.heading("type", text=t('type')); tree.column("type", width=100)
+    tree.heading("desc", text=t('description')); tree.column("desc", width=250)
+    tree.heading("amount", text=t('amount')); tree.column("amount", width=100, anchor="e")
+    tree.heading("direction", text=t('type')); tree.column("direction", width=80, anchor="center") # Direction header reused 'type' or new key? 'type' is fine or 'direction'
+    
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    # Alt Toplamlar
+    footer = ttk.Frame(content); footer.pack(fill="x", padx=10, pady=10)
+    lbl_total_in = ttk.Label(footer, text=f"{t('total_in_lbl')}: 0.00", font=("Segoe UI", 10, "bold"), foreground="green")
+    lbl_total_in.pack(side="left", padx=10)
+    lbl_total_out = ttk.Label(footer, text=f"{t('total_out_lbl')}: 0.00", font=("Segoe UI", 10, "bold"), foreground="red")
+    lbl_total_out.pack(side="left", padx=10)
+    lbl_balance = ttk.Label(footer, text=f"{t('balance_lbl')}: 0.00", font=("Segoe UI", 10, "bold"))
+    lbl_balance.pack(side="right", padx=10)
+    
+    def load_movements():
+        for i in tree.get_children(): tree.delete(i)
+        s_date = e_start.get().strip()
+        e_date = e_end.get().strip()
+        
+        moves = cs.get_cash_movements(cursor, s_date, e_date)
+        
+        t_in = 0.0
+        t_out = 0.0
+        
+        for m in moves:
+            # m: {id, date, type, amount, direction, desc}
+            tree.insert("", "end", values=(m['date'], m['type'], m['desc'], f"{m['amount']:.2f}", m['direction']))
+            if m['direction'] == 'Giriş':
+                t_in += m['amount']
+            else:
+                t_out += m['amount']
+                
+        lbl_total_in.config(text=f"{t('total_in_lbl')}: {t_in:.2f}")
+        lbl_total_out.config(text=f"{t('total_out_lbl')}: {t_out:.2f}")
+        lbl_balance.config(text=f"{t('balance_lbl')}: {t_in - t_out:.2f}")
+        
+    tk.Button(filter_frame, text="🔍 " + t('refresh'), command=load_movements, 
+              bg=ACCENT, fg="white", relief="flat").pack(side="left", padx=5)
+              
+    load_movements()
 
 def mount_kasa_devir(parent):
-    mount_placeholder(parent, "🔁", t('cash_closure'), t('coming_soon'))
+    from services import cash_service as cs
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="🔁 " + t('cash_closure'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Bugünün Özeti
+    today = datetime.now().strftime("%Y-%m-%d")
+    summary = cs.get_cash_summary(cursor, today)
+    
+    f_summary = ttk.Frame(content); f_summary.pack(pady=20)
+    
+    ttk.Label(f_summary, text=f"{t('date_lbl')}: {today}", font=("Segoe UI", 14, "bold")).grid(row=0, column=0, columnspan=2, pady=20)
+    
+    ttk.Label(f_summary, text=f"{t('total_in_lbl')}:", font=("Segoe UI", 12)).grid(row=1, column=0, padx=20, pady=10, sticky="e")
+    ttk.Label(f_summary, text=f"{summary['in']:.2f} ₺", font=("Segoe UI", 12, "bold"), foreground="green").grid(row=1, column=1, padx=20, pady=10, sticky="w")
+    
+    ttk.Label(f_summary, text=f"{t('total_out_lbl')}:", font=("Segoe UI", 12)).grid(row=2, column=0, padx=20, pady=10, sticky="e")
+    ttk.Label(f_summary, text=f"{summary['out']:.2f} ₺", font=("Segoe UI", 12, "bold"), foreground="red").grid(row=2, column=1, padx=20, pady=10, sticky="w")
+    
+    ttk.Label(f_summary, text=f"{t('end_day_balance')}:", font=("Segoe UI", 14, "bold")).grid(row=3, column=0, padx=20, pady=20, sticky="e")
+    ttk.Label(f_summary, text=f"{summary['balance']:.2f} ₺", font=("Segoe UI", 14, "bold"), foreground="#00b0ff").grid(row=3, column=1, padx=20, pady=20, sticky="w")
+    
+    def close_day():
+        # Basitçe bir rapor oluşturup kaydedebiliriz veya sadece mesaj gösterebiliriz
+        messagebox.showinfo(t('success'), f"{today} {t('close_day_success')}: {summary['balance']:.2f} ₺")
+        
+    tk.Button(content, text="✅ " + t('close_day_btn'), command=close_day,
+              bg="#28a745", fg="white", font=("Segoe UI", 12, "bold"),
+              relief="flat", padx=30, pady=15).pack(pady=20)
 
 def mount_kasa_rapor(parent):
-    mount_placeholder(parent, "📈", t('cash_report'), t('coming_soon'))
+    from services import cash_service as cs
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="📈 " + t('cash_report'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    # Filtreler
+    filter_frame = ttk.Frame(header); filter_frame.pack(side="right", padx=8)
+    
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    ttk.Label(filter_frame, text=t('start_date')).pack(side="left", padx=5)
+    e_start = ttk.Entry(filter_frame, width=12); e_start.pack(side="left", padx=5)
+    e_start.insert(0, today)
+    
+    ttk.Label(filter_frame, text=t('end_date')).pack(side="left", padx=5)
+    e_end = ttk.Entry(filter_frame, width=12); e_end.pack(side="left", padx=5)
+    e_end.insert(0, today)
+    
+    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Rapor Metni
+    txt_report = tk.Text(content, font=("Consolas", 10), width=80, height=20)
+    txt_report.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    def generate_report():
+        s_date = e_start.get().strip()
+        e_date = e_end.get().strip()
+        
+        moves = cs.get_cash_movements(cursor, s_date, e_date)
+        
+        # Aggregate
+        total_sales = sum(m['amount'] for m in moves if m['type'] == 'Satış')
+        total_collection = sum(m['amount'] for m in moves if m['type'] == 'Cari Tahsilat')
+        total_payment = sum(m['amount'] for m in moves if m['type'] == 'Cari Ödeme')
+        total_expense = sum(m['amount'] for m in moves if m['type'] == 'Masraf')
+        
+        report = f"{t('cash_report_title')}\n"
+        report += f"{t('date_range')}: {s_date} - {e_date}\n"
+        report += "-" * 40 + "\n"
+        report += f"{t('total_sales_cash')}: {total_sales:10.2f} ₺\n"
+        report += f"{t('total_collection')}:      {total_collection:10.2f} ₺\n"
+        report += "-" * 40 + "\n"
+        report += f"{t('total_inflow')}:         {total_sales + total_collection:10.2f} ₺\n\n"
+        
+        report += f"{t('total_payment')}:         {total_payment:10.2f} ₺\n"
+        report += f"{t('total_expense')}:        {total_expense:10.2f} ₺\n"
+        report += "-" * 40 + "\n"
+        report += f"{t('total_outflow')}:         {total_payment + total_expense:10.2f} ₺\n\n"
+        
+        report += "=" * 40 + "\n"
+        report += f"{t('net_balance_cap')}:           {(total_sales + total_collection) - (total_payment + total_expense):10.2f} ₺\n"
+        
+        txt_report.delete("1.0", tk.END)
+        txt_report.insert("1.0", report)
+        
+    tk.Button(filter_frame, text="📊 " + t('report_btn'), command=generate_report, 
+              bg=ACCENT, fg="white", relief="flat").pack(side="left", padx=5)
+              
+    generate_report()
 
 def mount_stok_raporu(parent):
-    mount_placeholder(parent, "📊", t('stock_report_menu'), t('coming_soon'))
+    from services import product_service as ps
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="📊 " + t('stock_report_menu'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Özet Kartları
+    summary_frame = ttk.Frame(content); summary_frame.pack(fill="x", padx=10, pady=10)
+    
+    products = ps.list_products(cursor)
+    # p: (id, name, barcode, sale_price, stock, buy_price, unit, category)
+    
+    total_items = len(products)
+    total_qty = sum(p[4] for p in products)
+    total_cost = sum(p[5] * p[4] for p in products)
+    total_sale = sum(p[3] * p[4] for p in products)
+    potential_profit = total_sale - total_cost
+    
+    def make_card(parent, title, value, color):
+        f = tk.Frame(parent, bg=CARD_COLOR, padx=15, pady=10)
+        f.pack(side="left", fill="both", expand=True, padx=5)
+        tk.Label(f, text=title, font=("Segoe UI", 10), bg=CARD_COLOR, fg="#aaaaaa").pack(anchor="w")
+        tk.Label(f, text=value, font=("Segoe UI", 14, "bold"), bg=CARD_COLOR, fg=color).pack(anchor="w")
+        return f
+
+    make_card(summary_frame, t('product_count'), str(total_items), "white")
+    make_card(summary_frame, t('total_stock'), f"{total_qty:.2f}", "#00b0ff")
+    make_card(summary_frame, t('cost_value'), f"{total_cost:.2f} ₺", "#ffc107")
+    make_card(summary_frame, t('sales_value'), f"{total_sale:.2f} ₺", "#28a745")
+    make_card(summary_frame, t('estimated_profit'), f"{potential_profit:.2f} ₺", "#17a2b8")
+    
+    # Liste
+    cols = ("name", "barcode", "stock", "unit", "buy", "sale", "total_buy", "total_sale")
+    tree = ttk.Treeview(content, columns=cols, show="headings")
+    
+    tree.heading("name", text=t('name')); tree.column("name", width=200)
+    tree.heading("barcode", text=t('barcode')); tree.column("barcode", width=120)
+    tree.heading("stock", text=t('stock')); tree.column("stock", width=80, anchor="center")
+    tree.heading("unit", text=t('unit')); tree.column("unit", width=60, anchor="center")
+    tree.heading("buy", text=t('buy_price')); tree.column("buy", width=80, anchor="e")
+    tree.heading("sale", text=t('sale_price')); tree.column("sale", width=80, anchor="e")
+    tree.heading("total_buy", text=t('total_cost')); tree.column("total_buy", width=100, anchor="e")
+    tree.heading("total_sale", text=t('total_sales')); tree.column("total_sale", width=100, anchor="e")
+    
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    for p in products:
+        t_buy = p[5] * p[4]
+        t_sale = p[3] * p[4]
+        tree.insert("", "end", values=(p[1], p[2], f"{p[4]:.2f}", p[6], 
+                                       f"{p[5]:.2f}", f"{p[3]:.2f}", 
+                                       f"{t_buy:.2f}", f"{t_sale:.2f}"))
 
 def mount_cari_raporu(parent):
-    mount_placeholder(parent, "📊", t('account_report_menu'), t('coming_soon'))
+    from services import cari_service as cs
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="📊 " + t('account_report_menu'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    caris = cs.list_all(cursor)
+    # c: (id, name, phone, address, balance, cari_type, ...)
+    
+    # Bakiye < 0: Bize borçlu (Alacağımız var)
+    # Bakiye > 0: Biz borçluyuz (Borcumuz var)
+    
+    total_alacak = sum(abs(c[4]) for c in caris if c[4] < 0)
+    total_borc = sum(c[4] for c in caris if c[4] > 0)
+    net_balance = sum(c[4] for c in caris) # Pozitifse biz borçluyuz, negatifse alacaklıyız
+    
+    # Özet
+    summary_frame = ttk.Frame(content); summary_frame.pack(fill="x", padx=10, pady=10)
+    
+    def make_card(parent, title, value, color):
+        f = tk.Frame(parent, bg=CARD_COLOR, padx=15, pady=10)
+        f.pack(side="left", fill="both", expand=True, padx=5)
+        tk.Label(f, text=title, font=("Segoe UI", 10), bg=CARD_COLOR, fg="#aaaaaa").pack(anchor="w")
+        tk.Label(f, text=value, font=("Segoe UI", 14, "bold"), bg=CARD_COLOR, fg=color).pack(anchor="w")
+        return f
+        
+    make_card(summary_frame, t('total_receivable_market'), f"{total_alacak:.2f} ₺", "green")
+    make_card(summary_frame, t('total_debt_ours'), f"{total_borc:.2f} ₺", "red")
+    
+    net_text = f"{abs(net_balance):.2f} ₺ " + (t('we_are_creditor') if net_balance < 0 else t('we_are_debtor'))
+    net_color = "green" if net_balance < 0 else "red"
+    make_card(summary_frame, t('net_status'), net_text, net_color)
+    
+    # Liste
+    cols = ("name", "phone", "type", "balance", "status")
+    tree = ttk.Treeview(content, columns=cols, show="headings")
+    
+    tree.heading("name", text=t('cari_name')); tree.column("name", width=200)
+    tree.heading("phone", text=t('phone')); tree.column("phone", width=120)
+    tree.heading("type", text=t('cari_type')); tree.column("type", width=100)
+    tree.heading("balance", text=t('balance')); tree.column("balance", width=120, anchor="e")
+    tree.heading("status", text=t('status')); tree.column("status", width=120, anchor="center")
+    
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    for c in caris:
+        bal = c[4]
+        if bal < 0:
+            status = t('debtor_to_us')
+            color = "green"
+        elif bal > 0:
+            status = t('creditor_from_us')
+            color = "red"
+        else:
+            status = "-"
+            color = "white"
+            
+        # Treeview'da satır rengi için tag kullanabiliriz ama şimdilik metin yeterli
+        tree.insert("", "end", values=(c[1], c[2], c[5], f"{abs(bal):.2f} ₺", status))
 
 def mount_kasa_raporu(parent):
-    mount_placeholder(parent, "📊", t('cash_report_menu'), t('coming_soon'))
+    mount_kasa_rapor(parent)
 
 
 def mount_users(parent):
@@ -2079,6 +2724,7 @@ def mount_sales(parent):
     from services import product_service as product_svc
     from services import sales_service as sales_svc
     from services import cari_service
+    from services import warehouse_service as wh_svc
     
     # Ana konteynır (sol menü için)
     main_container = tk.Frame(parent, bg=BG_COLOR)
@@ -2093,6 +2739,28 @@ def mount_sales(parent):
     top_section = tk.Frame(content_container, bg=BG_COLOR)
     top_section.pack(fill="x", padx=12, pady=(8,4))
     
+    # Depo Seçimi
+    wh_frame = tk.Frame(top_section, bg=BG_COLOR)
+    wh_frame.pack(side="right", padx=(0, 0))
+    
+    warehouses = wh_svc.list_warehouses(cursor)
+    wh_map = {w[1]: w[0] for w in warehouses}
+    wh_names = list(wh_map.keys())
+    selected_wh_id = tk.IntVar(value=warehouses[0][0] if warehouses else 1)
+
+    tk.Label(wh_frame, text="Depo:", bg=BG_COLOR, fg="white", font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 5))
+    wh_cb = ttk.Combobox(wh_frame, values=wh_names, state="readonly", width=15, font=("Segoe UI", 10))
+    if wh_names:
+        wh_cb.set(wh_names[0])
+    wh_cb.pack(side="left")
+    
+    def on_wh_change(event):
+        w_name = wh_cb.get()
+        if w_name in wh_map:
+            selected_wh_id.set(wh_map[w_name])
+            
+    wh_cb.bind("<<ComboboxSelected>>", on_wh_change)
+
     # Barkod giriş alanı (sol)
     barcode_frame = tk.Frame(top_section, bg=CARD_COLOR, relief="flat", bd=1)
     barcode_frame.pack(side="left", fill="x", expand=True, padx=(0,8))
@@ -3494,7 +4162,7 @@ def mount_sales(parent):
     # === FONKSİYONLAR ===
     def add_product_to_cart(pname, qty=1):
         """Ürünü sepete ekle"""
-        r = product_svc.get_price_stock_by_name(cursor, pname)
+        r = product_svc.get_price_stock_by_name(cursor, pname, selected_wh_id.get())
         if not r:
             return
         price, stock, unit = float(r[0]), float(r[1]), str(r[2])
@@ -3555,7 +4223,7 @@ def mount_sales(parent):
         if not barcode or t('scan_product_placeholder') in barcode:
             return
         
-        result = product_svc.get_by_barcode(cursor, barcode)
+        result = product_svc.get_by_barcode(cursor, barcode, selected_wh_id.get())
         if result:
             pid, pname, price, stock, unit = result
             add_product_to_cart(pname, 1)
@@ -3822,9 +4490,10 @@ def mount_sales(parent):
             final_pm = pm_map.get(payment_method, "cash")
 
             sales_list_for_print = []
+            wh_id = selected_wh_id.get()
             for d in sales_data:
-                product_svc.decrement_stock(conn, cursor, d['pname'], d['qty'])
-                sales_svc.insert_sale_line(conn, cursor, fis_id, d['pname'], d['qty'], d['price'], d['total'], payment_method=final_pm)
+                product_svc.decrement_stock(conn, cursor, d['pname'], d['qty'], warehouse_id=wh_id)
+                sales_svc.insert_sale_line(conn, cursor, fis_id, d['pname'], d['qty'], d['price'], d['total'], payment_method=final_pm, warehouse_id=wh_id)
                 sales_list_for_print.append((d['pname'], d['qty'], d['price'], d['total']))
             
             # CARİ İŞLEMLERİ (Otomatik Cari Oluşturma ve Kayıt)
@@ -4569,7 +5238,6 @@ def open_main_window(role, username):
         msub(purchase_sub, t('invoice_entry'), lambda: mount_fatura(right_panel))
         msub(purchase_sub, t('dispatch_list'), lambda: mount_irsaliye_listesi(right_panel))
         msub(purchase_sub, t('invoice_list'), lambda: mount_fatura_listesi(right_panel))
-        msub(purchase_sub, t('supplier_list'), lambda: mount_tedarikci_listesi(right_panel))
 
         # Personel Yönetimi
         personnel_header = mbtn(menu, "👥 " + t('personnel_mgmt'), lambda: None)
@@ -4598,6 +5266,7 @@ def open_main_window(role, username):
         warehouse_header.config(command=toggle_warehouse)
         register_section(warehouse_header, warehouse_sub, warehouse_visible)
         msub(warehouse_sub, t('warehouse_list'), lambda: mount_depo_listesi(right_panel))
+        msub(warehouse_sub, t('stock_list'), lambda: mount_depo_stok_listesi(right_panel))
         msub(warehouse_sub, t('transfer'), lambda: mount_depo_transfer(right_panel))
         msub(warehouse_sub, t('warehouse_movements'), lambda: mount_depo_hareket(right_panel))
 

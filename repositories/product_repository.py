@@ -36,18 +36,38 @@ def search_by_name(cursor, q: str) -> List[Tuple[int, str, str, float, float, fl
 
 # get product by barcode
 
-def get_by_barcode(cursor, barcode: str) -> Optional[Tuple[int, str, float, float, str]]:
-    cursor.execute(
-        "SELECT id,name,COALESCE(sale_price,price),stock,COALESCE(unit,'adet') FROM products WHERE barcode=?",
-        (barcode,)
-    )
+def get_by_barcode(cursor, barcode: str, warehouse_id: Optional[int] = None) -> Optional[Tuple[int, str, float, float, str]]:
+    if warehouse_id:
+        cursor.execute("""
+            SELECT p.id, p.name, COALESCE(p.sale_price, p.price), 
+                   COALESCE(ws.quantity, 0), 
+                   COALESCE(p.unit, 'adet')
+            FROM products p
+            LEFT JOIN warehouse_stocks ws ON p.id = ws.product_id AND ws.warehouse_id = ?
+            WHERE p.barcode = ?
+        """, (warehouse_id, barcode))
+    else:
+        cursor.execute(
+            "SELECT id,name,COALESCE(sale_price,price),stock,COALESCE(unit,'adet') FROM products WHERE barcode=?",
+            (barcode,)
+        )
     r = cursor.fetchone()
     return (int(r[0]), str(r[1]), float(r[2]), float(r[3]), str(r[4])) if r else None
 
 # get price and stock by name
 
-def get_price_stock_by_name(cursor, name: str) -> Optional[Tuple[float, float, str]]:
-    cursor.execute("SELECT COALESCE(sale_price,price),stock,COALESCE(unit,'adet') FROM products WHERE name=?", (name,))
+def get_price_stock_by_name(cursor, name: str, warehouse_id: Optional[int] = None) -> Optional[Tuple[float, float, str]]:
+    if warehouse_id:
+        cursor.execute("""
+            SELECT COALESCE(p.sale_price, p.price), 
+                   COALESCE(ws.quantity, 0), 
+                   COALESCE(p.unit, 'adet') 
+            FROM products p
+            LEFT JOIN warehouse_stocks ws ON p.id = ws.product_id AND ws.warehouse_id = ?
+            WHERE p.name = ?
+        """, (warehouse_id, name))
+    else:
+        cursor.execute("SELECT COALESCE(sale_price,price),stock,COALESCE(unit,'adet') FROM products WHERE name=?", (name,))
     r = cursor.fetchone()
     return (float(r[0]), float(r[1]), str(r[2])) if r else None
 

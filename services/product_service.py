@@ -10,7 +10,9 @@ def list_products(cursor, filter_text: str = "") -> List[Tuple[int, str, str, fl
     return repo.list_all(cursor)
 
 
-def add_product(conn, cursor, name: str, barcode: str, sale_price: float, stock: float, buy_price: float, unit: str = 'adet', category_id: Optional[int] = None) -> int:
+from services import warehouse_service as wh_svc
+
+def add_product(conn, cursor, name: str, barcode: str, sale_price: float, stock: float, buy_price: float, unit: str = 'adet', category_id: Optional[int] = None, warehouse_id: Optional[int] = None) -> int:
     name = (name or "").strip()
     barcode = (barcode or "").strip()
     if not name:
@@ -20,7 +22,13 @@ def add_product(conn, cursor, name: str, barcode: str, sale_price: float, stock:
     unit = (unit or 'adet').strip().lower()
     if unit not in ('adet', 'kg'):
         unit = 'adet'
-    return repo.insert(conn, cursor, name, barcode, float(sale_price), float(stock), float(buy_price), unit, category_id)
+    pid = repo.insert(conn, cursor, name, barcode, float(sale_price), float(stock), float(buy_price), unit, category_id)
+    
+    if warehouse_id and stock > 0:
+        wh_svc.repo.update_stock(cursor, warehouse_id, pid, float(stock))
+        wh_svc.repo.add_movement(cursor, None, warehouse_id, pid, float(stock), "Açılış Stoğu", 1)
+        
+    return pid
 
 
 def update_product(conn, cursor, pid: int, name: str, barcode: str, sale_price: float, stock: float, buy_price: float, unit: str = 'adet', category_id: Optional[int] = None) -> None:
@@ -42,22 +50,38 @@ def delete_product(conn, cursor, pid: int) -> None:
     repo.delete(conn, cursor, int(pid))
 
 
-def get_price_stock_by_name(cursor, name: str) -> Optional[Tuple[float, float, str]]:
-    return repo.get_price_stock_by_name(cursor, name)
+def get_price_stock_by_name(cursor, name: str, warehouse_id: Optional[int] = None) -> Optional[Tuple[float, float, str]]:
+    return repo.get_price_stock_by_name(cursor, name, warehouse_id)
 
 
-def get_by_barcode(cursor, barcode: str) -> Optional[Tuple[int, str, float, float, str]]:
-    return repo.get_by_barcode(cursor, barcode)
+def get_by_barcode(cursor, barcode: str, warehouse_id: Optional[int] = None) -> Optional[Tuple[int, str, float, float, str]]:
+    return repo.get_by_barcode(cursor, barcode, warehouse_id)
 
 def get_by_id(cursor, pid: int):
     return repo.get_by_id(cursor, pid)
 
-def decrement_stock(conn, cursor, name: str, qty: float) -> None:
-    repo.decrement_stock(conn, cursor, name, qty)
-
-
-def decrement_stock(conn, cursor, name: str, qty: float) -> None:
+def decrement_stock(conn, cursor, name: str, qty: float, warehouse_id: Optional[int] = None) -> None:
     repo.decrement_stock(conn, cursor, name, float(qty))
+    
+    if warehouse_id:
+        cursor.execute("SELECT id FROM products WHERE name=?", (name,))
+        row = cursor.fetchone()
+        if row:
+            pid = row[0]
+            current = wh_svc.repo.get_stock(cursor, warehouse_id, pid)
+            wh_svc.repo.update_stock(cursor, warehouse_id, pid, current - float(qty))
+            # Log movement (Exit)
+            wh_svc.repo.add_movement(cursor, warehouse_id, None, pid, float(qty), "Satış", 1)
 
-def increment_stock(conn, cursor, name: str, qty: float) -> None:
+def increment_stock(conn, cursor, name: str, qty: float, warehouse_id: Optional[int] = None) -> None:
     repo.increment_stock(conn, cursor, name, float(qty))
+    
+    if warehouse_id:
+        cursor.execute("SELECT id FROM products WHERE name=?", (name,))
+        row = cursor.fetchone()
+        if row:
+            pid = row[0]
+            current = wh_svc.repo.get_stock(cursor, warehouse_id, pid)
+            wh_svc.repo.update_stock(cursor, warehouse_id, pid, current + float(qty))
+            # Log movement (Entry)
+            wh_svc.repo.add_movement(cursor, None, warehouse_id, pid, float(qty), "Satış İptal/İade", 1)

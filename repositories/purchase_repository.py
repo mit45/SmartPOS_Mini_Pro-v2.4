@@ -1,10 +1,10 @@
 """Purchase Repository"""
 
-def add_document(conn, cursor, supplier_id, doc_type, doc_number, doc_date, total_amount, description):
+def add_document(conn, cursor, supplier_id, doc_type, doc_number, doc_date, total_amount, description, warehouse_id=None):
     cursor.execute("""
-        INSERT INTO purchase_documents(supplier_id, doc_type, doc_number, doc_date, total_amount, description)
-        VALUES(?,?,?,?,?,?)
-    """, (supplier_id, doc_type, doc_number, doc_date, total_amount, description))
+        INSERT INTO purchase_documents(supplier_id, doc_type, doc_number, doc_date, total_amount, description, warehouse_id)
+        VALUES(?,?,?,?,?,?,?)
+    """, (supplier_id, doc_type, doc_number, doc_date, total_amount, description, warehouse_id))
     conn.commit()
     return cursor.lastrowid
 
