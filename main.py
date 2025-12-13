@@ -1385,13 +1385,18 @@ def mount_depo_listesi(parent):
     tree.heading("name", text=t('name')); tree.column("name", width=150)
     tree.heading("location", text=t('address')); tree.column("location", width=200)
     tree.pack(fill="both", expand=True, padx=10, pady=10)
+
+    # Sol Alt: İşlem Butonları
+    btn_frame = ttk.Frame(left_panel)
+    btn_frame.pack(fill="x", padx=10, pady=(0,10))
     
     # Sağ: Ekleme ve Stok Detayı
     right_panel = ttk.Frame(content, style="Card.TFrame", width=350); right_panel.pack(side="right", fill="y")
     right_panel.pack_propagate(False)
     
     # Ekleme Bölümü
-    ttk.Label(right_panel, text=t('add'), style="Header.TLabel").pack(pady=10)
+    lbl_form_title = ttk.Label(right_panel, text=t('add'), style="Header.TLabel")
+    lbl_form_title.pack(pady=10)
     
     ttk.Label(right_panel, text=t('name')).pack(anchor="w", padx=10)
     e_name = ttk.Entry(right_panel); e_name.pack(fill="x", padx=10, pady=(0,10))
@@ -1399,6 +1404,8 @@ def mount_depo_listesi(parent):
     ttk.Label(right_panel, text=t('address')).pack(anchor="w", padx=10)
     e_loc = ttk.Entry(right_panel); e_loc.pack(fill="x", padx=10, pady=(0,10))
     
+    editing_id = tk.IntVar(value=0)
+
     def load_warehouses():
         for i in tree.get_children(): tree.delete(i)
         warehouses = ws.list_warehouses(cursor)
@@ -1410,18 +1417,78 @@ def mount_depo_listesi(parent):
         name = e_name.get().strip()
         loc = e_loc.get().strip()
         if not name: return
+        
         try:
-            ws.add_warehouse(conn, cursor, name, loc)
-            messagebox.showinfo(t('success'), t('saved'))
-            e_name.delete(0, tk.END); e_loc.delete(0, tk.END)
+            if editing_id.get() > 0:
+                ws.update_warehouse(conn, cursor, editing_id.get(), name, loc)
+                messagebox.showinfo(t('success'), t('updated'))
+            else:
+                ws.add_warehouse(conn, cursor, name, loc)
+                messagebox.showinfo(t('success'), t('saved'))
+            
+            cancel_edit()
             load_warehouses()
         except Exception as e:
             messagebox.showerror(t('error'), str(e))
             
-    tk.Button(right_panel, text="💾 " + t('save'), command=save_warehouse, bg=ACCENT, fg="white", relief="flat").pack(fill="x", padx=10, pady=10)
+    def edit_warehouse():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning(t('warning'), t('select_item'))
+            return
+        
+        item = tree.item(sel[0])
+        wid = int(item["text"])
+        vals = item["values"]
+        
+        editing_id.set(wid)
+        e_name.delete(0, tk.END); e_name.insert(0, vals[0])
+        e_loc.delete(0, tk.END); e_loc.insert(0, vals[1])
+        
+        lbl_form_title.config(text=t('edit'))
+        btn_save.config(text="💾 " + t('update_btn'))
+        btn_cancel.pack(fill="x", padx=10, pady=5, before=sep_stock)
+
+    def delete_warehouse():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning(t('warning'), t('select_item'))
+            return
+            
+        if messagebox.askyesno(t('confirm'), t('confirm_delete')):
+            wid = int(tree.item(sel[0])["text"])
+            try:
+                ws.delete_warehouse(conn, cursor, wid)
+                messagebox.showinfo(t('success'), t('done'))
+                load_warehouses()
+                # Eğer düzenlenen silindiyse iptal et
+                if editing_id.get() == wid:
+                    cancel_edit()
+            except Exception as e:
+                messagebox.showerror(t('error'), str(e))
+
+    def cancel_edit():
+        editing_id.set(0)
+        e_name.delete(0, tk.END)
+        e_loc.delete(0, tk.END)
+        lbl_form_title.config(text=t('add'))
+        btn_save.config(text="💾 " + t('save'))
+        btn_cancel.pack_forget()
+
+    btn_save = tk.Button(right_panel, text="💾 " + t('save'), command=save_warehouse, bg=ACCENT, fg="white", relief="flat")
+    btn_save.pack(fill="x", padx=10, pady=10)
     
+    sep_stock = ttk.Separator(right_panel, orient="horizontal")
+    sep_stock.pack(fill="x", padx=10, pady=10)
+    
+    btn_cancel = tk.Button(right_panel, text="❌ " + t('cancel_sale'), command=cancel_edit, bg="#e74c3c", fg="white", relief="flat")
+    # Başlangıçta gizli
+    
+    # Sol panel butonları
+    tk.Button(btn_frame, text="✏️ " + t('edit'), command=edit_warehouse, bg="#f39c12", fg="white", relief="flat").pack(side="left", fill="x", expand=True, padx=(0,5))
+    tk.Button(btn_frame, text="🗑️ " + t('delete'), command=delete_warehouse, bg="#e74c3c", fg="white", relief="flat").pack(side="left", fill="x", expand=True, padx=(5,0))
+
     # Stok Detayı Bölümü
-    ttk.Separator(right_panel, orient="horizontal").pack(fill="x", padx=10, pady=10)
     ttk.Label(right_panel, text=t('stock_status'), style="Header.TLabel").pack(pady=5)
     
     stock_tree = ttk.Treeview(right_panel, columns=("prod", "qty"), show="headings", height=10)
@@ -4152,13 +4219,6 @@ def mount_sales(parent):
     tk.Label(bottom_left, text=t('sms_note'), font=("Segoe UI", 8, "italic"),
              bg=CARD_COLOR, fg="#666").grid(row=3, column=0, columnspan=3, sticky="w", pady=(4,0))
     
-    # SATIŞ YAP butonu (sağ)
-    complete_sale_btn = tk.Button(bottom_section, text="✅ " + t('complete_sale_btn'),
-                                  font=("Segoe UI", 16, "bold"), bg="#28a745", fg="white",
-                                  relief="flat", padx=40, pady=24, cursor="hand2",
-                                  borderwidth=0, activebackground="#218838")
-    complete_sale_btn.pack(side="right", padx=12, pady=12)
-    
     # === FONKSİYONLAR ===
     def add_product_to_cart(pname, qty=1):
         """Ürünü sepete ekle"""
@@ -4606,7 +4666,6 @@ def mount_sales(parent):
     barcode_entry.bind("<Return>", barcode_scan)
     barcode_entry.bind("<FocusIn>", barcode_focus_in)
     barcode_entry.bind("<FocusOut>", barcode_focus_out)
-    complete_sale_btn.config(command=complete_sale)
     
     # Klavye kısayolları
     def keyboard_shortcuts(event):

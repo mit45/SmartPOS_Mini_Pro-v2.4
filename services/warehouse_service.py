@@ -7,6 +7,14 @@ def add_warehouse(conn, cursor, name, location):
     repo.add_warehouse(cursor, name, location)
     conn.commit()
 
+def update_warehouse(conn, cursor, warehouse_id, name, location):
+    repo.update_warehouse(cursor, warehouse_id, name, location)
+    conn.commit()
+
+def delete_warehouse(conn, cursor, warehouse_id):
+    repo.delete_warehouse(cursor, warehouse_id)
+    conn.commit()
+
 def list_warehouse_stocks(cursor, warehouse_id):
     return repo.list_warehouse_stocks(cursor, warehouse_id)
 

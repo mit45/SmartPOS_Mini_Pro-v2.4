@@ -9,6 +9,12 @@ def add_warehouse(cursor, name, location):
     cursor.execute("INSERT INTO warehouses (name, location) VALUES (?, ?)", (name, location))
     return cursor.lastrowid
 
+def update_warehouse(cursor, warehouse_id, name, location):
+    cursor.execute("UPDATE warehouses SET name = ?, location = ? WHERE id = ?", (name, location, warehouse_id))
+
+def delete_warehouse(cursor, warehouse_id):
+    cursor.execute("DELETE FROM warehouses WHERE id = ?", (warehouse_id,))
+
 def get_stock(cursor, warehouse_id, product_id):
     cursor.execute("SELECT quantity FROM warehouse_stocks WHERE warehouse_id = ? AND product_id = ?", (warehouse_id, product_id))
     res = cursor.fetchone()
