@@ -63,6 +63,52 @@ def list_recent_receipts(cursor, limit: int = 200) -> List[Tuple[str, str, float
     ]
 
 
+def get_receipts_between(cursor, from_dt: str, to_dt: str) -> List[Tuple[str, str, float, str]]:
+    """Return unique receipts (fis_id) with date, total sum and payment method within a date range."""
+    cursor.execute(
+        """
+        SELECT fis_id,
+               MAX(created_at) as ts,
+               SUM(total) as sum_total,
+               MIN(COALESCE(payment_method,'cash')) as pay
+        FROM sales
+        WHERE (canceled IS NULL OR canceled=0)
+          AND datetime(created_at) BETWEEN datetime(?) AND datetime(?)
+        GROUP BY fis_id
+        ORDER BY ts DESC
+        """,
+        (from_dt, to_dt)
+    )
+    rows = cursor.fetchall()
+    return [
+        (str(r[0]), str(r[1]), float(r[2]), str(r[3]))
+        for r in rows
+    ]
+
+
 def cancel_receipt(conn, cursor, fis_id: str) -> None:
     cursor.execute("UPDATE sales SET canceled=1 WHERE fis_id=? AND (canceled IS NULL OR canceled=0)", (fis_id,))
     conn.commit()
+
+
+def get_profit_stats(cursor, from_dt: str, to_dt: str) -> Tuple[float, float]:
+    """
+    Returns (total_revenue, total_cost_of_goods_sold).
+    COGS is calculated based on current product buy_price.
+    """
+    cursor.execute(
+        """
+        SELECT
+            SUM(s.total) as total_revenue,
+            SUM(s.quantity * COALESCE(p.buy_price, 0)) as total_cost
+        FROM sales s
+        LEFT JOIN products p ON s.product_name = p.name
+        WHERE (s.canceled IS NULL OR s.canceled=0)
+          AND datetime(s.created_at) BETWEEN datetime(?) AND datetime(?)
+        """,
+        (from_dt, to_dt)
+    )
+    row = cursor.fetchone()
+    if row:
+        return (row[0] or 0.0, row[1] or 0.0)
+    return (0.0, 0.0)

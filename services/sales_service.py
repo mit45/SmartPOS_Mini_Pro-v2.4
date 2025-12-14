@@ -13,6 +13,10 @@ def list_recent_receipts(cursor, limit: int = 200):
     return repo.list_recent_receipts(cursor, limit)
 
 
+def list_receipts_between(cursor, from_dt: str, to_dt: str):
+    return repo.get_receipts_between(cursor, from_dt, to_dt)
+
+
 def cancel_receipt(conn, cursor, fis_id: str) -> None:
     """Mark receipt canceled and restore products stock."""
     # get lines to restore stock
@@ -25,3 +29,7 @@ def cancel_receipt(conn, cursor, fis_id: str) -> None:
             # even if a product is missing, try to proceed
             pass
     repo.cancel_receipt(conn, cursor, fis_id)
+
+
+def get_profit_loss_stats(cursor, from_dt: str, to_dt: str):
+    return repo.get_profit_stats(cursor, from_dt, to_dt)

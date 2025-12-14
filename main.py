@@ -191,6 +191,16 @@ def _mount_purchase_screen(parent, doc_type):
     supplier_names = [s[1] for s in suppliers]
     cb_supplier = ttk.Combobox(info_frame, values=supplier_names, width=30)
     cb_supplier.grid(row=0, column=1, padx=10, pady=10)
+
+    def filter_suppliers(event):
+        text = cb_supplier.get()
+        if not text:
+            cb_supplier['values'] = supplier_names
+        else:
+            filtered = [s for s in supplier_names if text.lower() in s.lower()]
+            cb_supplier['values'] = filtered
+    
+    cb_supplier.bind('<KeyRelease>', filter_suppliers)
     
     ttk.Label(info_frame, text="Belge No:").grid(row=0, column=2, padx=10, pady=10)
     e_doc_no = ttk.Entry(info_frame); e_doc_no.grid(row=0, column=3, padx=10, pady=10)
@@ -286,20 +296,82 @@ def _mount_purchase_screen(parent, doc_type):
     
     items_data = [] # list of dict
     
+    def ask_qty_price_custom(title, product_name, initial_price):
+        dialog = tk.Toplevel(parent)
+        dialog.title(title)
+        dialog.geometry("350x250")
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(parent)
+        dialog.grab_set()
+        
+        # Center
+        dialog.update_idletasks()
+        w = dialog.winfo_width()
+        h = dialog.winfo_height()
+        x = (dialog.winfo_screenwidth() // 2) - (w // 2)
+        y = (dialog.winfo_screenheight() // 2) - (h // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        result = []
+        
+        ttk.Label(dialog, text=product_name, font=("Segoe UI", 11, "bold"), background=BG_COLOR, foreground=ACCENT).pack(pady=(15, 10))
+
+        # Qty
+        f_qty = ttk.Frame(dialog, style="Card.TFrame")
+        f_qty.pack(fill="x", padx=20, pady=5)
+        ttk.Label(f_qty, text=t('quantity') + ":", width=10, anchor="w").pack(side="left")
+        sv_qty = tk.StringVar()
+        e_qty = ttk.Entry(f_qty, textvariable=sv_qty)
+        e_qty.pack(side="left", fill="x", expand=True)
+        
+        # Ensure focus after window is ready
+        def set_focus():
+            e_qty.focus_force()
+        dialog.after(200, set_focus)
+
+        # Price
+        f_price = ttk.Frame(dialog, style="Card.TFrame")
+        f_price.pack(fill="x", padx=20, pady=5)
+        ttk.Label(f_price, text=t('buy_price') + ":", width=10, anchor="w").pack(side="left")
+        sv_price = tk.StringVar(value=str(initial_price))
+        e_price = ttk.Entry(f_price, textvariable=sv_price)
+        e_price.pack(side="left", fill="x", expand=True)
+
+        def on_ok(event=None):
+            q = sv_qty.get()
+            p = sv_price.get()
+            if q and p:
+                result.append((q, p))
+                dialog.destroy()
+            
+        def on_cancel(event=None):
+            dialog.destroy()
+            
+        btn_frame = ttk.Frame(dialog, style="Card.TFrame")
+        btn_frame.pack(pady=20)
+        
+        ttk.Button(btn_frame, text="OK", command=on_ok).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="İptal", command=on_cancel).pack(side="left", padx=5)
+        
+        e_qty.bind("<Return>", lambda e: e_price.focus_set())
+        e_price.bind("<Return>", on_ok)
+        dialog.bind("<Escape>", on_cancel)
+        
+        parent.wait_window(dialog)
+        return result[0] if result else None
+
     def add_item_to_list(prod_tuple):
         pid = prod_tuple[0]
         full_prod = product_svc.get_by_id(cursor, pid) # (id, name, barcode, sale_price, stock, buy_price, unit)
         buy_price = full_prod[5]
         
-        # Ask for Qty and Price
-        qty_str = simpledialog.askstring(t('quantity'), f"{full_prod[1]}\n{t('quantity')}:", parent=parent)
-        if not qty_str: return
-        try: qty = float(qty_str)
-        except: return
+        res = ask_qty_price_custom(t('add_product'), full_prod[1], buy_price)
+        if not res: return
         
-        price_str = simpledialog.askstring(t('price'), f"{t('buy_price')}:", initialvalue=str(buy_price), parent=parent)
-        if not price_str: return
-        try: price = float(price_str)
+        qty_str, price_str = res
+        try: 
+            qty = float(qty_str)
+            price = float(price_str)
         except: return
         
         total = qty * price
@@ -324,17 +396,32 @@ def _mount_purchase_screen(parent, doc_type):
     lbl_total.pack(pady=10)
     
     def save_doc():
-        if not items_data: return
-        supplier_name = cb_supplier.get()
+        supplier_name = cb_supplier.get().strip()
+        doc_no = e_doc_no.get().strip()
+        doc_date = e_date.get().strip()
+        
+        if not supplier_name:
+            messagebox.showwarning(t('warning'), t('supplier_list') + " seçilmelidir.")
+            return
+        
+        if not doc_no:
+            messagebox.showwarning(t('warning'), "Belge numarası girilmelidir.")
+            return
+            
+        if not doc_date:
+            messagebox.showwarning(t('warning'), t('date') + " girilmelidir.")
+            return
+
+        if not items_data:
+            messagebox.showwarning(t('warning'), "En az bir ürün eklenmelidir.")
+            return
+
         supplier_id = None
         if supplier_name:
             for s in suppliers:
                 if s[1] == supplier_name:
                     supplier_id = s[0]
                     break
-        
-        doc_no = e_doc_no.get().strip()
-        doc_date = e_date.get().strip()
         
         wh_name = cb_warehouse.get()
         wh_id = wh_map.get(wh_name) if wh_name else None
@@ -864,111 +951,510 @@ def mount_kategori(parent):
 
     load_categories()
 
-
-def mount_stok_giris(parent):
-    _mount_stok_islem(parent, mode="in")
-
-def mount_stok_cikis(parent):
-    _mount_stok_islem(parent, mode="out")
-
 def mount_envanter_sayim(parent):
-    _mount_stok_islem(parent, mode="count")
-
-def _mount_stok_islem(parent, mode: str = "in"):
-    for w in parent.winfo_children():
-        w.destroy()
-    title = t('stock_in') if mode=="in" else (t('stock_out') if mode=="out" else t('inventory_count'))
-    icon = "⬆️" if mode=="in" else ("⬇️" if mode=="out" else "📦")
-    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12, 8))
-    ttk.Label(header, text=f"{icon} {title}", style="Header.TLabel").pack(side="left", padx=8)
-
-    body = ttk.Frame(parent, style="Card.TFrame"); body.pack(fill="x", padx=12, pady=8)
-    body.grid_columnconfigure(1, weight=1)
-
     from services import product_service as ps
     from services import warehouse_service as wh_svc
+    import datetime
+
+    for w in parent.winfo_children(): w.destroy()
+
+    # --- Layout ---
+    paned = tk.PanedWindow(parent, orient=tk.HORIZONTAL, sashwidth=4, bg=BG_COLOR)
+    paned.pack(fill="both", expand=True, padx=12, pady=12)
+
+    # Left Panel: History
+    left_frame = ttk.Frame(paned, style="Card.TFrame", width=300)
+    paned.add(left_frame, stretch="never")
+    
+    ttk.Label(left_frame, text="📋 " + t('history'), style="Header.TLabel", font=("Segoe UI", 12, "bold")).pack(fill="x", padx=8, pady=8)
+    
+    hist_cols = ("id", "date", "desc")
+    hist_tree = ttk.Treeview(left_frame, columns=hist_cols, show="headings", height=20)
+    hist_tree.heading("id", text="#")
+    hist_tree.heading("date", text=t('date'))
+    hist_tree.heading("desc", text=t('description'))
+    hist_tree.column("id", width=40, anchor="center")
+    hist_tree.column("date", width=120)
+    hist_tree.column("desc", width=100)
+    hist_tree.pack(fill="both", expand=True, padx=4, pady=4)
+
+    # Context Menu for History
+    hist_menu = tk.Menu(left_frame, tearoff=0)
+    hist_menu.add_command(label="🗑 " + t('delete'), command=lambda: delete_history_record())
+
+    def on_hist_right_click(event):
+        item = hist_tree.identify_row(event.y)
+        if item:
+            hist_tree.selection_set(item)
+            hist_menu.post(event.x_root, event.y_root)
+
+    hist_tree.bind("<Button-3>", on_hist_right_click)
+
+    # Right Panel: Details
+    right_frame = ttk.Frame(paned, style="Card.TFrame")
+    paned.add(right_frame, stretch="always")
+
+    header = ttk.Frame(right_frame, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12, 8))
+    lbl_title = ttk.Label(header, text="📦 " + t('inventory_count'), style="Header.TLabel", font=("Segoe UI", 16, "bold"))
+    lbl_title.pack(side="left", padx=8)
+    
+    # --- Form Section ---
+    form_frame = ttk.Frame(right_frame, style="Card.TFrame")
+    form_frame.pack(fill="x", padx=12, pady=8)
+    
+    form_frame.columnconfigure(1, weight=1)
+    form_frame.columnconfigure(3, weight=1)
+
+    # Data Loading
     products = ps.list_products(cursor)
-    names = [p[1] for p in products]
+    product_names = sorted([p[1] for p in products])
+    product_map = {p[1]: p[0] for p in products} # Name -> ID
+    barcode_map = {str(p[2]): p[1] for p in products if p[2]}
 
-    ttk.Label(body, text=t('product')+":", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=8, pady=8, sticky="e")
-    cb = ttk.Combobox(body, values=names, width=40, state="readonly", font=("Segoe UI", 10))
-    cb.grid(row=0, column=1, padx=8, pady=8, sticky="ew")
+    # Product Selection
+    ttk.Label(form_frame, text=t('product')+":", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=8, pady=12, sticky="e")
+    cb_product = ttk.Combobox(form_frame, values=product_names, font=("Segoe UI", 10))
+    cb_product.grid(row=0, column=1, padx=8, pady=12, sticky="ew")
+    
+    # Placeholder Logic
+    placeholder_text = t('enter_product_or_barcode')
+    cb_product.set(placeholder_text)
+    
+    def on_prod_focus_in(event):
+        if cb_product.get() == placeholder_text:
+            cb_product.set('')
+            cb_product.config(foreground='black') # Normal text color
 
-    # Depo Seçimi
-    ttk.Label(body, text=t('warehouse') + ":", font=("Segoe UI", 10, "bold")).grid(row=0, column=2, padx=8, pady=8, sticky="e")
+    def on_prod_focus_out(event):
+        if not cb_product.get():
+            cb_product.set(placeholder_text)
+            # cb_product.config(foreground='grey') # Optional: grey out placeholder
+
+    cb_product.bind("<FocusIn>", on_prod_focus_in)
+    cb_product.bind("<FocusOut>", on_prod_focus_out)
+
+    # Warehouse Selection
+    ttk.Label(form_frame, text=t('warehouse')+":", font=("Segoe UI", 10, "bold")).grid(row=0, column=2, padx=8, pady=12, sticky="e")
     warehouses = wh_svc.list_warehouses(cursor)
     wh_map = {w[1]: w[0] for w in warehouses}
     wh_names = list(wh_map.keys())
-    wh_cb = ttk.Combobox(body, values=wh_names, width=20, state="readonly", font=("Segoe UI", 10))
-    wh_cb.grid(row=0, column=3, padx=8, pady=8, sticky="ew")
-    if wh_names: wh_cb.set(wh_names[0])
+    cb_warehouse = ttk.Combobox(form_frame, values=wh_names, state="readonly", font=("Segoe UI", 10))
+    cb_warehouse.grid(row=0, column=3, padx=8, pady=12, sticky="ew")
+    if wh_names: cb_warehouse.set(wh_names[0])
 
-    ttk.Label(body, text=t('stock')+":", font=("Segoe UI", 10)).grid(row=1, column=0, padx=8, pady=6, sticky="e")
-    lbl_stock = ttk.Label(body, text="-", font=("Segoe UI", 10, "bold")); lbl_stock.grid(row=1, column=1, padx=8, pady=6, sticky="w")
-    ttk.Label(body, text=t('unit')+":", font=("Segoe UI", 10)).grid(row=1, column=2, padx=8, pady=6, sticky="e")
-    lbl_unit = ttk.Label(body, text="-", font=("Segoe UI", 10)); lbl_unit.grid(row=1, column=3, padx=8, pady=6, sticky="w")
+    # Current Stock Info
+    ttk.Label(form_frame, text=t('stock')+":", font=("Segoe UI", 10)).grid(row=1, column=0, padx=8, pady=8, sticky="e")
+    lbl_current_stock = ttk.Label(form_frame, text="-", font=("Segoe UI", 10, "bold"))
+    lbl_current_stock.grid(row=1, column=1, padx=8, pady=8, sticky="w")
+    
+    ttk.Label(form_frame, text=t('unit')+":", font=("Segoe UI", 10)).grid(row=1, column=2, padx=8, pady=8, sticky="e")
+    lbl_unit = ttk.Label(form_frame, text="-", font=("Segoe UI", 10))
+    lbl_unit.grid(row=1, column=3, padx=8, pady=8, sticky="w")
 
-    qty_label = t('quantity') if mode!="count" else t('stock')
-    ttk.Label(body, text=qty_label+":", font=("Segoe UI", 10, "bold")).grid(row=2, column=0, padx=8, pady=6, sticky="e")
-    e_qty = ttk.Entry(body, width=12, font=("Segoe UI", 10)); e_qty.grid(row=2, column=1, padx=8, pady=6, sticky="w")
+    # New Count Entry
+    ttk.Label(form_frame, text=t('inventory_count')+":", font=("Segoe UI", 10, "bold")).grid(row=2, column=0, padx=8, pady=12, sticky="e")
+    entry_count = ttk.Entry(form_frame, font=("Segoe UI", 10))
+    entry_count.grid(row=2, column=1, padx=8, pady=12, sticky="w")
 
-    def refresh():
-        name = cb.get()
-        w_name = wh_cb.get()
+    # Add Button
+    btn_add = tk.Button(form_frame, text="⬇️ " + t('add'), 
+                       bg="#00b0ff", fg="white", font=("Segoe UI", 10, "bold"),
+                       relief="flat", padx=20, pady=6, cursor="hand2", borderwidth=0)
+    btn_add.grid(row=2, column=3, padx=8, pady=12, sticky="e")
+
+    # --- List Section ---
+    list_frame = ttk.Frame(right_frame, style="Card.TFrame")
+    list_frame.pack(fill="both", expand=True, padx=12, pady=8)
+
+    cols = ("no", "product", "warehouse", "old_stock", "new_count", "diff")
+    tree = ttk.Treeview(list_frame, columns=cols, show="headings", height=10)
+    tree.heading("no", text="#")
+    tree.heading("product", text=t('product'))
+    tree.heading("warehouse", text=t('warehouse'))
+    tree.heading("old_stock", text=t('stock'))
+    tree.heading("new_count", text=t('inventory_count'))
+    tree.heading("diff", text="Fark")
+    
+    tree.column("no", width=40, anchor="center")
+    tree.column("product", width=200)
+    tree.column("warehouse", width=150)
+    tree.column("old_stock", width=100, anchor="center")
+    tree.column("new_count", width=100, anchor="center")
+    tree.column("diff", width=100, anchor="center")
+
+    # Zebrastripe
+    tree.tag_configure('oddrow', background=BG_COLOR)
+    tree.tag_configure('evenrow', background=CARD_COLOR)
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+
+    # State
+    # We use a mutable container for current_count_id so inner functions can modify it
+    state: dict = {'current_count_id': None, 'editing_item': None} 
+    
+    pending_items = [] # {'pid', 'product', 'wh_id', 'wh_name', 'old', 'new', 'unit', 'saved_new', 'id'}
+
+    def refresh_info(*args):
+        p_name = cb_product.get()
+        w_name = cb_warehouse.get()
         wh_id = wh_map.get(w_name)
         
-        if not name:
-            lbl_stock.config(text="-"); lbl_unit.config(text="-"); return
-        info = ps.get_price_stock_by_name(cursor, name, wh_id)
+        if not p_name or p_name == placeholder_text:
+            lbl_current_stock.config(text="-")
+            lbl_unit.config(text="-")
+            return
+            
+        info = ps.get_price_stock_by_name(cursor, p_name, wh_id)
         if info:
-            _price, stock, unit = info
+            _, stock, unit = info
             lbl_unit.config(text=str(unit))
-            if str(unit).lower()=="kg":
-                lbl_stock.config(text=f"{float(stock):.3f}")
+            if str(unit).lower() == "kg":
+                lbl_current_stock.config(text=f"{float(stock):.3f}")
             else:
-                lbl_stock.config(text=str(int(float(stock))))
+                lbl_current_stock.config(text=str(int(float(stock))))
+        else:
+            lbl_current_stock.config(text="0")
+            lbl_unit.config(text="-")
 
-    cb.bind("<<ComboboxSelected>>", lambda *_: refresh())
-    wh_cb.bind("<<ComboboxSelected>>", lambda *_: refresh())
-
-    def apply_change():
-        name = cb.get().strip()
-        w_name = wh_cb.get()
-        wh_id = wh_map.get(w_name)
+    # --- Search & Barcode Logic ---
+    def on_product_enter(event=None):
+        val = cb_product.get().strip()
+        if not val or val == placeholder_text: return
         
-        if not name:
-            return messagebox.showwarning(t('warning'), t('select_item'))
-        qty = parse_float_safe(e_qty.get(), None)
-        if qty is None or qty < 0:
+        # 1. Barkod kontrolü
+        if val in barcode_map:
+            found_name = barcode_map[val]
+            cb_product.set(found_name)
+            cb_product.icursor(tk.END)
+            refresh_info()
+            entry_count.focus_set()
+            return
+
+        # 2. Tam isim kontrolü
+        if val in product_names:
+            refresh_info()
+            entry_count.focus_set()
+            return
+            
+        # 3. Case-insensitive isim kontrolü
+        for name in product_names:
+            if name.lower() == val.lower():
+                cb_product.set(name)
+                refresh_info()
+                entry_count.focus_set()
+                return
+        
+        # Bulunamadı
+        messagebox.showwarning(t('warning'), t('product_not_found'), parent=parent)
+
+    def on_key_release(event):
+        if event.keysym in ['Return', 'Up', 'Down', 'Left', 'Right', 'Tab']: return
+        val = cb_product.get()
+        if val == '':
+            cb_product['values'] = product_names
+        else:
+            filtered = [n for n in product_names if val.lower() in n.lower()]
+            cb_product['values'] = filtered
+
+    cb_product.bind("<Return>", on_product_enter)
+    cb_product.bind("<KeyRelease>", on_key_release)
+    cb_product.bind("<<ComboboxSelected>>", refresh_info)
+    cb_warehouse.bind("<<ComboboxSelected>>", refresh_info)
+
+    def add_to_list():
+        p_name = cb_product.get().strip()
+        w_name = cb_warehouse.get().strip()
+        wh_id = wh_map.get(w_name)
+        count_str = entry_count.get().strip()
+        
+        if not p_name or not w_name or p_name == placeholder_text:
+            return messagebox.showwarning(t('warning'), t('fill_all_fields'))
+        
+        try:
+            new_count = float(count_str)
+            if new_count < 0: raise ValueError
+        except:
             return messagebox.showwarning(t('warning'), t('enter_valid'))
-        info2 = ps.get_price_stock_by_name(cursor, name, wh_id)
-        if not info2:
-            return messagebox.showerror(t('error'), t('product_not_found'))
-        price, stock, unit = info2
-        if mode=="in":
-            ps.increment_stock(conn, cursor, name, float(qty), warehouse_id=wh_id)
-        elif mode=="out":
-            if float(qty) > float(stock):
-                return messagebox.showwarning(t('warning'), t('insufficient_stock').format(stock=stock))
-            ps.decrement_stock(conn, cursor, name, float(qty), warehouse_id=wh_id)
-        else:  # count
-            # set stock to target by adjusting delta
-            target = float(qty)
-            delta = target - float(stock)
-            if abs(delta) > 1e-9:
-                if delta > 0:
-                    ps.increment_stock(conn, cursor, name, delta, warehouse_id=wh_id)
-                else:
-                    ps.decrement_stock(conn, cursor, name, -delta, warehouse_id=wh_id)
-        refresh(); messagebox.showinfo(t('success'), t('done'))
 
-    btn_text = t('save') if mode=="count" else t('apply') if t('apply')!= 'apply' else t('save')
-    tk.Button(body, text="✅ "+btn_text, command=apply_change,
-              bg="#00b0ff", fg="white", font=("Segoe UI", 10, "bold"),
-              activebackground="#0ea5e9", relief="flat", padx=14, pady=8, borderwidth=0).grid(row=3, column=1, padx=8, pady=10, sticky="w")
+        # Check if already in list
+        for item in pending_items:
+            if item['product'] == p_name and item['wh_id'] == wh_id:
+                return messagebox.showwarning(t('warning'), "Bu ürün zaten listede ekli. Lütfen listeden düzenleyin.")
 
-    if names:
-        cb.set(names[0]); refresh()
+        # Determine old stock and ID
+        # If we are editing an item, we should reuse its original 'old' stock and 'id'
+        editing_item = state.get('editing_item')
+        
+        if editing_item and editing_item['product'] == p_name and editing_item['wh_id'] == wh_id:
+            # We are re-adding the item we were editing
+            old_stock = editing_item['old']
+            unit = editing_item.get('unit', '-')
+            item_id = editing_item.get('id')
+            saved_new = editing_item.get('saved_new')
+            state['editing_item'] = None # Clear editing state
+        else:
+            # New item or changed product
+            info = ps.get_price_stock_by_name(cursor, p_name, wh_id)
+            old_stock = float(info[1]) if info else 0.0
+            unit = info[2] if info else "-"
+            item_id = None
+            saved_new = None
+            # If we were editing but changed product, the original editing_item is effectively discarded (deleted)
+            state['editing_item'] = None
+
+        item = {
+            'id': item_id,
+            'product': p_name,
+            'wh_id': wh_id,
+            'wh_name': w_name,
+            'old': old_stock,
+            'new': new_count,
+            'unit': unit,
+            'saved_new': saved_new
+        }
+        pending_items.append(item)
+        update_tree()
+        entry_count.delete(0, tk.END)
+        cb_product.set('')
+        cb_product.focus_set()
+        refresh_info()
+
+    def update_tree():
+        for i in tree.get_children(): tree.delete(i)
+        for idx, item in enumerate(pending_items):
+            diff = item['new'] - item['old']
+            diff_str = f"{diff:+.2f}"
+            tag = 'evenrow' if idx % 2 == 0 else 'oddrow'
+            tree.insert("", "end", values=(idx + 1, item['product'], item['wh_name'], item['old'], item['new'], diff_str), tags=(tag,))
+
+    def delete_selected():
+        sel = tree.selection()
+        if not sel: return
+        idx = tree.index(sel[0])
+        del pending_items[idx]
+        update_tree()
+
+    def edit_selected():
+        sel = tree.selection()
+        if not sel: return
+        idx = tree.index(sel[0])
+        item = pending_items[idx]
+        
+        # Save to editing state so we can preserve ID and old_stock
+        state['editing_item'] = item.copy()
+        
+        # Load back to form
+        cb_product.set(item['product'])
+        cb_warehouse.set(item['wh_name'])
+        entry_count.delete(0, tk.END)
+        entry_count.insert(0, str(item['new']))
+        refresh_info()
+        
+        # Remove from list
+        del pending_items[idx]
+        update_tree()
+
+    def delete_history_record():
+        sel = hist_tree.selection()
+        if not sel: return
+        item_vals = hist_tree.item(sel[0])['values']
+        try:
+            c_id = int(item_vals[0])
+        except:
+            c_id = item_vals[0]
+            
+        if not messagebox.askyesno(t('confirm'), t('confirm_delete')):
+            return
+            
+        try:
+            cursor.execute("DELETE FROM inventory_count_items WHERE count_id=?", (c_id,))
+            cursor.execute("DELETE FROM inventory_counts WHERE id=?", (c_id,))
+            conn.commit()
+            
+            if state['current_count_id'] == c_id:
+                reset_form()
+            
+            load_history()
+            messagebox.showinfo(t('success'), t('done'))
+        except Exception as e:
+            conn.rollback()
+            messagebox.showerror(t('error'), str(e))
+
+    def load_history():
+        for i in hist_tree.get_children(): hist_tree.delete(i)
+        try:
+            cursor.execute("SELECT id, created_at, description FROM inventory_counts ORDER BY id DESC")
+            rows = cursor.fetchall()
+            for r in rows:
+                hist_tree.insert("", "end", values=(r[0], r[1][:16], r[2] or "-"))
+        except Exception as e:
+            print("History load error:", e)
+
+    def on_history_select(event):
+        sel = hist_tree.selection()
+        if not sel: return
+        item_vals = hist_tree.item(sel[0])['values']
+        try:
+            c_id = int(item_vals[0])
+        except (ValueError, TypeError):
+            c_id = item_vals[0]
+        
+        # Load items
+        try:
+            cursor.execute("SELECT id, product_name, warehouse_id, warehouse_name, old_stock, new_stock FROM inventory_count_items WHERE count_id=?", (c_id,))
+            rows = cursor.fetchall()
+            
+            pending_items.clear()
+            state['editing_item'] = None
+            
+            for r in rows:
+                pending_items.append({
+                    'id': r[0],
+                    'product': r[1],
+                    'wh_id': r[2],
+                    'wh_name': r[3],
+                    'old': r[4],
+                    'new': r[5],
+                    'saved_new': r[5], # Store original saved value for diff calc
+                    'unit': '-'
+                })
+            
+            state['current_count_id'] = c_id
+            lbl_title.config(text=f"📦 {t('inventory_count')} #{c_id}")
+            update_tree()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    hist_tree.bind("<<TreeviewSelect>>", on_history_select)
+
+    def reset_form():
+        state['current_count_id'] = None
+        state['editing_item'] = None
+        pending_items.clear()
+        update_tree()
+        lbl_title.config(text="📦 " + t('inventory_count'))
+        entry_count.delete(0, tk.END)
+        cb_product.set(placeholder_text)
+        refresh_info()
+
+    def save_all():
+        if not pending_items:
+            return messagebox.showinfo(t('info'), "Listede ürün yok.")
+            
+        if not messagebox.askyesno(t('confirm'), f"{len(pending_items)} adet ürün stoğu güncellenecek. Onaylıyor musunuz?"):
+            return
+            
+        try:
+            c_id = state['current_count_id']
+            
+            if c_id is None:
+                # INSERT NEW
+                cursor.execute("INSERT INTO inventory_counts(description) VALUES (?)", ("Sayım Fişi",))
+                c_id = cursor.lastrowid
+                
+                for item in pending_items:
+                    # Insert item
+                    cursor.execute("""
+                        INSERT INTO inventory_count_items(count_id, product_id, product_name, warehouse_id, warehouse_name, old_stock, new_stock)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (c_id, product_map.get(item['product']), item['product'], item['wh_id'], item['wh_name'], item['old'], item['new']))
+                    
+                    # Update Stock
+                    delta = item['new'] - item['old']
+                    if abs(delta) > 1e-9:
+                        if delta > 0:
+                            ps.increment_stock(conn, cursor, item['product'], delta, warehouse_id=item['wh_id'])
+                        else:
+                            ps.decrement_stock(conn, cursor, item['product'], -delta, warehouse_id=item['wh_id'])
+            else:
+                # UPDATE EXISTING
+                # 1. Get current DB items to handle updates and deletions
+                cursor.execute("SELECT id, product_name, warehouse_id, old_stock, new_stock FROM inventory_count_items WHERE count_id=?", (c_id,))
+                db_rows = cursor.fetchall()
+                db_items_map = {row[0]: {'product': row[1], 'wh_id': row[2], 'old': row[3], 'new': row[4]} for row in db_rows}
+                
+                # 2. Process pending items (Updates & Inserts)
+                for item in pending_items:
+                    item_id = item.get('id')
+                    
+                    if item_id and item_id in db_items_map:
+                        # UPDATE existing item
+                        db_item = db_items_map.pop(item_id) # Remove from map, so we know it's handled
+                        saved_new = db_item['new']
+                        
+                        # Calculate adjustment based on difference from PREVIOUSLY SAVED new_stock
+                        adjustment = item['new'] - saved_new
+                        
+                        if abs(adjustment) > 1e-9:
+                            # Update stock
+                            if adjustment > 0:
+                                ps.increment_stock(conn, cursor, item['product'], adjustment, warehouse_id=item['wh_id'])
+                            else:
+                                ps.decrement_stock(conn, cursor, item['product'], -adjustment, warehouse_id=item['wh_id'])
+                            
+                            # Update DB
+                            cursor.execute("UPDATE inventory_count_items SET new_stock=? WHERE id=?", (item['new'], item_id))
+                    else:
+                        # INSERT new item into existing count
+                        cursor.execute("""
+                            INSERT INTO inventory_count_items(count_id, product_id, product_name, warehouse_id, warehouse_name, old_stock, new_stock)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (c_id, product_map.get(item['product']), item['product'], item['wh_id'], item['wh_name'], item['old'], item['new']))
+                        
+                        delta = item['new'] - item['old']
+                        if abs(delta) > 1e-9:
+                            if delta > 0:
+                                ps.increment_stock(conn, cursor, item['product'], delta, warehouse_id=item['wh_id'])
+                            else:
+                                ps.decrement_stock(conn, cursor, item['product'], -delta, warehouse_id=item['wh_id'])
+
+                # 3. Handle Deletions (Items remaining in db_items_map)
+                for del_id, del_item in db_items_map.items():
+                    # Revert the stock change made by this item
+                    # Original change was: new - old
+                    # To revert, we apply: -(new - old) = old - new
+                    revert_amount = del_item['old'] - del_item['new']
+                    
+                    if abs(revert_amount) > 1e-9:
+                        if revert_amount > 0:
+                            ps.increment_stock(conn, cursor, del_item['product'], revert_amount, warehouse_id=del_item['wh_id'])
+                        else:
+                            ps.decrement_stock(conn, cursor, del_item['product'], -revert_amount, warehouse_id=del_item['wh_id'])
+                    
+                    cursor.execute("DELETE FROM inventory_count_items WHERE id=?", (del_id,))
+
+            conn.commit()
+            messagebox.showinfo(t('success'), t('done'))
+            reset_form()
+            load_history()
+            
+        except Exception as e:
+            conn.rollback()
+            messagebox.showerror(t('error'), str(e))
+
+    btn_add.config(command=add_to_list)
+    entry_count.bind("<Return>", lambda event: add_to_list())
+
+    # Action Buttons
+    action_frame = ttk.Frame(parent, style="Card.TFrame")
+    action_frame.pack(fill="x", padx=12, pady=(0,12))
+    
+    tk.Button(action_frame, text="✏️ " + t('edit'), command=edit_selected,
+             bg="#f59e0b", fg="white", font=("Segoe UI", 10, "bold"),
+             relief="flat", padx=16, pady=10, cursor="hand2", borderwidth=0).pack(side="left", padx=4, pady=8)
+             
+    tk.Button(action_frame, text="🗑 " + t('delete'), command=delete_selected,
+             bg="#ef4444", fg="white", font=("Segoe UI", 10, "bold"),
+             relief="flat", padx=16, pady=10, cursor="hand2", borderwidth=0).pack(side="left", padx=4, pady=8)
+
+    tk.Button(action_frame, text="💾 " + t('save'), command=save_all,
+             bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
+             relief="flat", padx=20, pady=10, cursor="hand2", borderwidth=0).pack(side="right", padx=4, pady=8)
+
+    if product_names:
+        cb_product.set(placeholder_text)
+        refresh_info()
+    
+    load_history()
 
 def mount_tahsilat(parent):
     _mount_cari_islem(parent, mode="tahsilat")
@@ -2007,6 +2493,86 @@ def mount_cari_raporu(parent):
 def mount_kasa_raporu(parent):
     mount_kasa_rapor(parent)
 
+def mount_profit_loss_report(parent):
+    from services import sales_service as sales_svc
+    from services import expense_service as expense_svc
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="📊 " + t('profit_loss_report_menu'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    # Date Filter
+    filt = tk.Frame(parent, bg=CARD_COLOR)
+    filt.pack(fill="x", padx=12, pady=(0, 8))
+    
+    sv_from = tk.StringVar(value=date.today().strftime("%Y-%m-%d"))
+    sv_to = tk.StringVar(value=date.today().strftime("%Y-%m-%d"))
+    
+    tk.Label(filt, text="📅 " + t('start_date'), bg=CARD_COLOR, fg=FG_COLOR,
+             font=("Segoe UI", 10, "bold")).pack(side="left", padx=(10,6))
+    from_entry = ttk.Entry(filt, textvariable=sv_from, width=12, font=("Segoe UI", 11))
+    from_entry.pack(side="left", padx=(0,16), ipady=4)
+    
+    tk.Label(filt, text="📅 " + t('end_date'), bg=CARD_COLOR, fg=FG_COLOR,
+             font=("Segoe UI", 10, "bold")).pack(side="left", padx=(10,6))
+    to_entry = ttk.Entry(filt, textvariable=sv_to, width=12, font=("Segoe UI", 11))
+    to_entry.pack(side="left", padx=(0,12), ipady=4)
+    
+    content = ttk.Frame(parent, style="Card.TFrame")
+    content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Results Container
+    results_frame = tk.Frame(content, bg=CARD_COLOR)
+    results_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    def calculate():
+        for w in results_frame.winfo_children(): w.destroy()
+        
+        frm, to = sv_from.get().strip(), sv_to.get().strip()
+        try:
+            datetime.strptime(frm, "%Y-%m-%d")
+            datetime.strptime(to, "%Y-%m-%d")
+        except:
+            messagebox.showwarning(t('warning'), t('date_format_warning'))
+            return
+            
+        to_plus = datetime.strptime(to, "%Y-%m-%d").replace(hour=23,minute=59,second=59).strftime("%Y-%m-%d %H:%M:%S")
+        
+        total_revenue, total_cogs = sales_svc.get_profit_loss_stats(cursor, f"{frm} 00:00:00", to_plus)
+        total_expenses = expense_svc.get_total_expenses(cursor, frm, to)
+        
+        gross_profit = total_revenue - total_cogs
+        net_profit = gross_profit - total_expenses
+        
+        def add_row(label, value, color=FG_COLOR, is_bold=False, size=14):
+            row = tk.Frame(results_frame, bg=CARD_COLOR)
+            row.pack(fill="x", pady=8)
+            font_style = ("Segoe UI", size, "bold") if is_bold else ("Segoe UI", size)
+            tk.Label(row, text=label, font=font_style, bg=CARD_COLOR, fg=FG_COLOR).pack(side="left")
+            tk.Label(row, text=f"{value:.2f} ₺", font=font_style, bg=CARD_COLOR, fg=color).pack(side="right")
+            
+        add_row("Toplam Satış (Ciro):", total_revenue, "#10b981", True)
+        add_row("Satılan Malın Maliyeti:", total_cogs, "#ef4444")
+        
+        tk.Frame(results_frame, bg=TEXT_GRAY, height=1).pack(fill="x", pady=10)
+        
+        add_row("Brüt Kar:", gross_profit, "#00b0ff", True)
+        add_row("Toplam Giderler:", total_expenses, "#ef4444")
+        
+        tk.Frame(results_frame, bg=TEXT_GRAY, height=1).pack(fill="x", pady=10)
+        
+        net_color = "#10b981" if net_profit >= 0 else "#ef4444"
+        add_row("NET KAR/ZARAR:", net_profit, net_color, True, 18)
+
+    # Calculate Button
+    btn_calc = tk.Button(filt, text="Hesapla", command=calculate,
+                        bg="#00b0ff", fg="white", font=("Segoe UI", 10, "bold"),
+                        relief="flat", padx=16, pady=4, cursor="hand2", borderwidth=0)
+    btn_calc.pack(side="left", padx=10)
+    
+    calculate()
+
 def mount_quick_menu_settings(parent):
     from services import quick_menu_service as qms
     from services import product_service as ps
@@ -2195,14 +2761,17 @@ def mount_theme_settings(parent):
     for w in parent.winfo_children(): w.destroy()
     
     header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
-    ttk.Label(header, text="🎨 " + t('theme_settings'), style="Header.TLabel").pack(side="left", padx=8)
+    ttk.Label(header, text="🎨 " + t('theme_settings'), style="Header.TLabel", font=("Segoe UI", 16, "bold")).pack(side="left", padx=8)
     
-    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    # Main Content Grid
+    content = ttk.Frame(parent, style="Card.TFrame")
+    content.pack(fill="both", expand=True, padx=12, pady=8)
     
-    # Sol: Hazır Temalar
-    left_panel = ttk.Frame(content); left_panel.pack(side="left", fill="both", expand=True, padx=20, pady=20)
+    # Left Panel: Presets
+    left_panel = tk.Frame(content, bg=CARD_COLOR)
+    left_panel.pack(side="left", fill="both", expand=True, padx=20, pady=20)
     
-    ttk.Label(left_panel, text=t('theme_select'), style="Header.TLabel").pack(anchor="w", pady=(0,20))
+    tk.Label(left_panel, text=t('theme_select'), font=("Segoe UI", 14, "bold"), bg=CARD_COLOR, fg=FG_COLOR).pack(anchor="w", pady=(0,20))
     
     def apply_preset(bg, fg, sidebar, card, accent):
         save_theme(bg, fg, sidebar, card, accent)
@@ -2212,17 +2781,27 @@ def mount_theme_settings(parent):
         
     def set_light():
         apply_preset("#f5f6fa", "#2c3e50", "#2c3e50", "#ffffff", "#3498db")
-        
-    tk.Button(left_panel, text="🌙 " + t('dark_theme'), command=set_dark, 
-              bg="#23232a", fg="white", font=("Segoe UI", 12), relief="flat", padx=20, pady=10).pack(fill="x", pady=5)
-              
-    tk.Button(left_panel, text="☀️ " + t('light_theme'), command=set_light, 
-              bg="#f5f6fa", fg="#2c3e50", font=("Segoe UI", 12), relief="flat", padx=20, pady=10).pack(fill="x", pady=5)
-              
-    # Sağ: Özel Renkler
-    right_panel = ttk.Frame(content); right_panel.pack(side="right", fill="both", expand=True, padx=20, pady=20)
     
-    ttk.Label(right_panel, text=t('custom_theme'), style="Header.TLabel").pack(anchor="w", pady=(0,20))
+    # Dark Theme Button
+    btn_dark = tk.Button(left_panel, text="🌙 " + t('dark_theme'), command=set_dark, 
+              bg="#23232a", fg="white", font=("Segoe UI", 11, "bold"), 
+              relief="flat", padx=20, pady=15, cursor="hand2", borderwidth=0)
+    btn_dark.pack(fill="x", pady=10)
+    
+    # Light Theme Button
+    btn_light = tk.Button(left_panel, text="☀️ " + t('light_theme'), command=set_light, 
+              bg="#f5f6fa", fg="#2c3e50", font=("Segoe UI", 11, "bold"), 
+              relief="flat", padx=20, pady=15, cursor="hand2", borderwidth=0)
+    btn_light.pack(fill="x", pady=10)
+    
+    # Separator
+    tk.Frame(content, width=1, bg=TEXT_GRAY).pack(side="left", fill="y", pady=20)
+
+    # Right Panel: Custom Colors
+    right_panel = tk.Frame(content, bg=CARD_COLOR)
+    right_panel.pack(side="right", fill="both", expand=True, padx=20, pady=20)
+    
+    tk.Label(right_panel, text=t('custom_theme'), font=("Segoe UI", 14, "bold"), bg=CARD_COLOR, fg=FG_COLOR).pack(anchor="w", pady=(0,20))
     
     colors = {
         "theme_bg": {"label": t('bg_color'), "val": BG_COLOR},
@@ -2240,21 +2819,31 @@ def mount_theme_settings(parent):
         if color[1]:
             entries[key].delete(0, tk.END)
             entries[key].insert(0, color[1])
-            entries[key].config(bg=color[1])
+            entries[key].config(bg=color[1], fg="white" if is_dark(color[1]) else "black")
             
+    def is_dark(hex_color):
+        hex_color = hex_color.lstrip('#')
+        try:
+            r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+            return (r*0.299 + g*0.587 + b*0.114) < 128
+        except: return True
+
     for key, data in colors.items():
-        row = ttk.Frame(right_panel)
-        row.pack(fill="x", pady=5)
-        ttk.Label(row, text=data["label"], width=20).pack(side="left")
+        row = tk.Frame(right_panel, bg=CARD_COLOR)
+        row.pack(fill="x", pady=8)
         
-        e = tk.Entry(row, width=15)
+        tk.Label(row, text=data["label"], font=("Segoe UI", 10), bg=CARD_COLOR, fg=FG_COLOR, width=20, anchor="w").pack(side="left")
+        
+        e = tk.Entry(row, width=12, font=("Consolas", 10))
         e.insert(0, data["val"])
-        e.pack(side="left", padx=5)
-        try: e.config(bg=data["val"])
+        e.pack(side="left", padx=10, ipady=4)
+        try: 
+            e.config(bg=data["val"], fg="white" if is_dark(data["val"]) else "black")
         except: pass
         entries[key] = e
         
-        tk.Button(row, text="🎨", command=lambda k=key: pick_color(k), width=3).pack(side="left")
+        tk.Button(row, text="🎨", command=lambda k=key: pick_color(k), 
+                 bg=CARD_COLOR, fg=FG_COLOR, relief="flat", cursor="hand2").pack(side="left", padx=5)
         
     def save_custom():
         save_theme(
@@ -2278,7 +2867,8 @@ def mount_theme_settings(parent):
             messagebox.showerror(t('error'), str(e))
 
     tk.Button(right_panel, text="💾 " + t('save'), command=save_custom, 
-              bg=ACCENT, fg="white", relief="flat", padx=20, pady=10).pack(fill="x", pady=20)
+              bg=ACCENT, fg="white", font=("Segoe UI", 10, "bold"),
+              relief="flat", padx=20, pady=12, cursor="hand2", borderwidth=0).pack(fill="x", pady=20)
 
 
 def mount_users(parent):
@@ -2326,18 +2916,70 @@ def mount_users(parent):
             tree.insert("", "end", text=str(row[0]), values=(idx, row[1], row[2]))
 
     def add_user():
-        u = simpledialog.askstring(t('new_user'), t('username'))
-        if not u: return
-        p = simpledialog.askstring(t('new_user'), t('password'))
-        if not p: return
-        r = simpledialog.askstring(t('new_user'), t('role_input'), initialvalue="cashier") or "cashier"
-        try:
-            users_svc.add_user(conn, cursor, u, p, r)
-            load()
-        except sqlite3.IntegrityError:
-            messagebox.showerror(t('error'), t('duplicate_user_error'))
-        except ValueError as ve:
-            messagebox.showwarning(t('warning'), str(ve))
+        dialog = tk.Toplevel(parent)
+        dialog.title(t('new_user'))
+        set_theme(dialog)
+        center_window(dialog, 400, 380)
+        dialog.resizable(False, False)
+        try: dialog.grab_set()
+        except: pass
+
+        # Header
+        header = tk.Frame(dialog, bg=BG_COLOR)
+        header.pack(fill="x", pady=15)
+        tk.Label(header, text="👤 " + t('new_user'), font=("Segoe UI", 16, "bold"), bg=BG_COLOR, fg=ACCENT).pack()
+
+        # Form
+        form = tk.Frame(dialog, bg=BG_COLOR)
+        form.pack(fill="both", expand=True, padx=25)
+
+        # Username
+        tk.Label(form, text=t('username'), font=("Segoe UI", 10, "bold"), bg=BG_COLOR, fg=FG_COLOR).pack(anchor="w", pady=(5, 2))
+        entry_user = ttk.Entry(form, font=("Segoe UI", 11))
+        entry_user.pack(fill="x", ipady=4)
+        entry_user.focus_set()
+
+        # Password
+        tk.Label(form, text=t('password'), font=("Segoe UI", 10, "bold"), bg=BG_COLOR, fg=FG_COLOR).pack(anchor="w", pady=(10, 2))
+        entry_pass = ttk.Entry(form, font=("Segoe UI", 11), show="*")
+        entry_pass.pack(fill="x", ipady=4)
+
+        # Role
+        tk.Label(form, text=t('role'), font=("Segoe UI", 10, "bold"), bg=BG_COLOR, fg=FG_COLOR).pack(anchor="w", pady=(10, 2))
+        combo_role = ttk.Combobox(form, values=["admin", "cashier"], state="readonly", font=("Segoe UI", 11))
+        combo_role.set("cashier")
+        combo_role.pack(fill="x", ipady=4)
+
+        def save():
+            u = entry_user.get().strip()
+            p = entry_pass.get().strip()
+            r = combo_role.get().strip()
+
+            if not u or not p:
+                messagebox.showwarning(t('warning'), t('fill_all_fields'), parent=dialog)
+                return
+
+            try:
+                users_svc.add_user(conn, cursor, u, p, r)
+                load()
+                dialog.destroy()
+                messagebox.showinfo(t('success'), t('user_added'), parent=parent)
+            except sqlite3.IntegrityError:
+                messagebox.showerror(t('error'), t('duplicate_user_error'), parent=dialog)
+            except ValueError as ve:
+                messagebox.showwarning(t('warning'), str(ve), parent=dialog)
+
+        # Buttons
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.pack(fill="x", pady=20, padx=25)
+
+        tk.Button(btn_frame, text=t('cancel'), command=dialog.destroy,
+                 bg="#ef4444", fg="white", font=("Segoe UI", 10, "bold"),
+                 relief="flat", padx=15, pady=8, cursor="hand2", borderwidth=0).pack(side="right", padx=5)
+        
+        tk.Button(btn_frame, text="✅ " + t('save'), command=save,
+                 bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
+                 relief="flat", padx=15, pady=8, cursor="hand2", borderwidth=0).pack(side="right", padx=5)
 
     def edit_user():
         sel = tree.selection()
@@ -2596,6 +3238,59 @@ def mount_reports(parent):
         except: return False
 
     from services import sales_service as sales_svc
+    from services import expense_service as expense_svc
+
+    def show_profit_loss():
+        frm, to = sv_from.get().strip(), sv_to.get().strip()
+        if not (valid_date(frm) and valid_date(to)):
+            return messagebox.showwarning(t('warning'), t('date_format_warning'))
+        
+        to_plus = datetime.strptime(to, "%Y-%m-%d").replace(hour=23,minute=59,second=59).strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Get data
+        total_revenue, total_cogs = sales_svc.get_profit_loss_stats(cursor, f"{frm} 00:00:00", to_plus)
+        total_expenses = expense_svc.get_total_expenses(cursor, frm, to)
+        
+        gross_profit = total_revenue - total_cogs
+        net_profit = gross_profit - total_expenses
+        
+        # Show in a custom dialog
+        dialog = tk.Toplevel(parent)
+        dialog.title("💰 Kar/Zarar Raporu")
+        set_theme(dialog)
+        center_window(dialog, 400, 450)
+        
+        header = tk.Frame(dialog, bg=BG_COLOR)
+        header.pack(fill="x", pady=20)
+        tk.Label(header, text="Kar/Zarar Analizi", font=("Segoe UI", 18, "bold"), bg=BG_COLOR, fg=ACCENT).pack()
+        tk.Label(header, text=f"{frm} - {to}", font=("Segoe UI", 10), bg=BG_COLOR, fg=TEXT_GRAY).pack()
+        
+        content = tk.Frame(dialog, bg=CARD_COLOR)
+        content.pack(fill="both", expand=True, padx=20, pady=(0,20))
+        
+        def add_row(label, value, color=FG_COLOR, is_bold=False):
+            row = tk.Frame(content, bg=CARD_COLOR)
+            row.pack(fill="x", pady=8, padx=15)
+            font_style = ("Segoe UI", 12, "bold") if is_bold else ("Segoe UI", 12)
+            tk.Label(row, text=label, font=font_style, bg=CARD_COLOR, fg=FG_COLOR).pack(side="left")
+            tk.Label(row, text=f"{value:.2f} ₺", font=font_style, bg=CARD_COLOR, fg=color).pack(side="right")
+            
+        add_row("Toplam Satış:", total_revenue, "#10b981")
+        add_row("Satılan Malın Maliyeti:", total_cogs, "#ef4444")
+        
+        tk.Frame(content, bg=TEXT_GRAY, height=1).pack(fill="x", padx=15, pady=5)
+        
+        add_row("Brüt Kar:", gross_profit, "#00b0ff", True)
+        add_row("Toplam Giderler:", total_expenses, "#ef4444")
+        
+        tk.Frame(content, bg=TEXT_GRAY, height=1).pack(fill="x", padx=15, pady=5)
+        
+        net_color = "#10b981" if net_profit >= 0 else "#ef4444"
+        add_row("NET KAR/ZARAR:", net_profit, net_color, True)
+        
+        tk.Button(dialog, text="Kapat", command=dialog.destroy,
+                 bg=BG_COLOR, fg=FG_COLOR, font=("Segoe UI", 10),
+                 relief="flat", padx=20, pady=10).pack(pady=10)
 
     def load_report():
         frm, to = sv_from.get().strip(), sv_to.get().strip()
@@ -2725,6 +3420,7 @@ def mount_reports(parent):
 
     # Butonları oluştur (yukarıda tanımlandı)
     create_report_button(btns, "🔍 " + t('list'), load_report, "#00b0ff")
+    create_report_button(btns, "💰 Kar/Zarar", show_profit_loss, "#f59e0b")
     create_report_button(btns, "� PDF", export_pdf, "#9333ea")
     create_report_button(btns, "📥 CSV", export_csv, "#10b981")
 
@@ -5005,6 +5701,23 @@ def mount_cancel_sales(parent):
     ttk.Label(header, text="🛑 " + t('cancel_sale'), style="Header.TLabel",
               font=("Segoe UI", 16, "bold")).pack(side="left", padx=8)
 
+    # Date Filter
+    filt = tk.Frame(parent, bg=CARD_COLOR)
+    filt.pack(fill="x", padx=12, pady=(0, 8))
+    
+    sv_from = tk.StringVar(value=date.today().strftime("%Y-%m-%d"))
+    sv_to = tk.StringVar(value=date.today().strftime("%Y-%m-%d"))
+    
+    tk.Label(filt, text="📅 " + t('start_date'), bg=CARD_COLOR, fg=FG_COLOR,
+             font=("Segoe UI", 10, "bold")).pack(side="left", padx=(10,6))
+    from_entry = ttk.Entry(filt, textvariable=sv_from, width=12, font=("Segoe UI", 11))
+    from_entry.pack(side="left", padx=(0,16), ipady=4)
+    
+    tk.Label(filt, text="📅 " + t('end_date'), bg=CARD_COLOR, fg=FG_COLOR,
+             font=("Segoe UI", 10, "bold")).pack(side="left", padx=(10,6))
+    to_entry = ttk.Entry(filt, textvariable=sv_to, width=12, font=("Segoe UI", 11))
+    to_entry.pack(side="left", padx=(0,12), ipady=4)
+
     body = ttk.Frame(parent, style="Card.TFrame")
     body.pack(fill="both", expand=True, padx=12, pady=8)
     
@@ -5035,7 +5748,21 @@ def mount_cancel_sales(parent):
 
     def load():
         for r in tree.get_children(): tree.delete(r)
-        for fis_id, ts, sum_total, pay in sales_svc.list_recent_receipts(cursor, 200):
+        
+        frm, to = sv_from.get().strip(), sv_to.get().strip()
+        try:
+            datetime.strptime(frm, "%Y-%m-%d")
+            datetime.strptime(to, "%Y-%m-%d")
+        except:
+            # Fallback if date is invalid
+            return
+
+        to_plus = datetime.strptime(to, "%Y-%m-%d").replace(hour=23,minute=59,second=59).strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Use list_receipts_between instead of list_recent_receipts
+        results = sales_svc.list_receipts_between(cursor, f"{frm} 00:00:00", to_plus)
+
+        for fis_id, ts, sum_total, pay in results:
             ts_disp = (ts or "").replace("T"," ")
             # Ödeme yöntemi ikonlu
             if pay == 'cash' or pay == 'nakit':
@@ -5546,8 +6273,6 @@ def open_main_window(role, username):
         register_section(stock_header, stock_sub, stock_visible)
         msub(stock_sub, t('stock_list'), lambda: mount_products(right_panel))
         msub(stock_sub, t('category_mgmt'), lambda: mount_kategori(right_panel))
-        msub(stock_sub, t('stock_in'), lambda: mount_stok_giris(right_panel))
-        msub(stock_sub, t('stock_out'), lambda: mount_stok_cikis(right_panel))
         msub(stock_sub, t('inventory_count'), lambda: mount_envanter_sayim(right_panel))
 
         # Cari Yönetim
@@ -5658,6 +6383,7 @@ def open_main_window(role, username):
         msub(reports_sub, t('stock_report_menu'), lambda: mount_stok_raporu(right_panel))
         msub(reports_sub, t('account_report_menu'), lambda: mount_cari_raporu(right_panel))
         msub(reports_sub, t('cash_report_menu'), lambda: mount_kasa_raporu(right_panel))
+        msub(reports_sub, t('profit_loss_report_menu'), lambda: mount_profit_loss_report(right_panel))
 
         # Diğer menüler
         mbtn(menu, "🧾 " + t('receipts'), lambda: mount_receipts(right_panel))
@@ -6053,4 +6779,3 @@ if __name__ == "__main__":
     
     # Giriş ekranını aç
     start_login_screen()
-

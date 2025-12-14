@@ -190,6 +190,7 @@ LANGUAGES = {
     "stock_report_menu": "Stok Raporu",
     "account_report_menu": "Cari Raporu",
     "cash_report_menu": "Kasa Raporu",
+    "profit_loss_report_menu": "Kar/Zarar Raporu",
     "settings": "Ayarlar",
     "quick_menu_settings": "Hızlı Menü Ayarları",
     "quick_menu_title": "Hızlı Menü Yönetimi",
@@ -409,6 +410,9 @@ LANGUAGES = {
         "end_day_balance": "Gün Sonu Bakiyesi",
         "close_day_btn": "GÜNÜ KAPAT",
         "close_day_success": "tarihli kasa devri başarıyla tamamlandı.\n\nDevir Bakiyesi",
+        
+        "history": "Geçmiş Sayımlar",
+        "enter_product_or_barcode": "Ürün adı veya barkod giriniz...",
     },
     "en": {
         "app_title": "SmartPOS Mini Pro",
@@ -587,6 +591,7 @@ LANGUAGES = {
     "stock_report_menu": "Stock Report",
     "account_report_menu": "Account Report",
     "cash_report_menu": "Cash Report",
+    "profit_loss_report_menu": "Profit/Loss Report",
     "settings": "Settings",
     "quick_menu_settings": "Quick Menu Settings",
     "quick_menu_title": "Quick Menu Management",
@@ -806,5 +811,8 @@ LANGUAGES = {
         "end_day_balance": "End of Day Balance",
         "close_day_btn": "CLOSE DAY",
         "close_day_success": "Cash closure completed successfully.\n\nClosing Balance",
+        
+        "history": "History",
+        "enter_product_or_barcode": "Enter product name or barcode...",
     }
 }

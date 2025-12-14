@@ -290,4 +290,27 @@ def init_schema(conn, cursor):
         )
         """
     )
+
+    # inventory_counts (sayım fişleri)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventory_counts(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      description TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+
+    # inventory_count_items (sayım kalemleri)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventory_count_items(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      count_id INTEGER,
+      product_id INTEGER,
+      product_name TEXT,
+      warehouse_id INTEGER,
+      warehouse_name TEXT,
+      old_stock REAL,
+      new_stock REAL,
+      FOREIGN KEY (count_id) REFERENCES inventory_counts(id) ON DELETE CASCADE
+    )""")
+
     conn.commit()
