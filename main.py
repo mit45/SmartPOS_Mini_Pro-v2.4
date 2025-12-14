@@ -14,6 +14,7 @@ from receipts import print_receipt, print_thermal_receipt
 # ==========================
 FG_COLOR   = "#ffffff"
 BG_COLOR   = "#18181c"
+SIDEBAR_COLOR = "#18181c"
 CARD_COLOR = "#23232a"
 ACCENT     = "#00b0ff"
 TEXT_LIGHT = "#ffffff"
@@ -57,6 +58,27 @@ def load_language_preference():
     except Exception:
         pass
 
+def load_theme_settings():
+    """Kaydedilmiş tema ayarlarını yükle"""
+    global FG_COLOR, BG_COLOR, SIDEBAR_COLOR, CARD_COLOR, ACCENT, TEXT_LIGHT, TEXT_GRAY
+    try:
+        cursor.execute("SELECT key, value FROM settings WHERE key LIKE 'theme_%'")
+        rows = cursor.fetchall()
+        theme_data = {k: v for k, v in rows}
+        
+        if 'theme_fg' in theme_data: FG_COLOR = theme_data['theme_fg']
+        if 'theme_bg' in theme_data: BG_COLOR = theme_data['theme_bg']
+        if 'theme_sidebar' in theme_data: SIDEBAR_COLOR = theme_data['theme_sidebar']
+        if 'theme_card' in theme_data: CARD_COLOR = theme_data['theme_card']
+        if 'theme_accent' in theme_data: ACCENT = theme_data['theme_accent']
+        
+        # Türetilmiş renkler
+        TEXT_LIGHT = FG_COLOR
+        # Basitçe okunabilirlik için griyi de ana metin rengi yapalım veya yakın bir ton
+        TEXT_GRAY = FG_COLOR 
+    except Exception:
+        pass
+
 def set_theme(window):
     style = ttk.Style(window)
     try:
@@ -65,22 +87,25 @@ def set_theme(window):
         pass
     window.configure(bg=BG_COLOR)
     style.configure("TFrame", background=BG_COLOR)
-    style.configure("TLabel", background=BG_COLOR, foreground=TEXT_LIGHT, font=("Segoe UI", 10))
+    style.configure("TLabel", background=BG_COLOR, foreground=FG_COLOR, font=("Segoe UI", 10))
     style.configure("Header.TLabel", background=BG_COLOR, foreground=ACCENT, font=("Segoe UI", 16, "bold"))
-    style.configure("Sub.TLabel", background=BG_COLOR, foreground=TEXT_GRAY,  font=("Segoe UI", 9))
+    style.configure("Sub.TLabel", background=BG_COLOR, foreground=FG_COLOR,  font=("Segoe UI", 9))
     style.configure("Card.TFrame", background=CARD_COLOR)
-    style.configure("Treeview", background="#1f1f25", fieldbackground="#1f1f25", foreground=TEXT_LIGHT)
-    style.configure("Treeview.Heading", background="#30303a", foreground=TEXT_LIGHT)
-    style.map("Treeview", background=[("selected", "#004e75")])
-    # Menü scrollbari opak görünsün
+    
+    # Treeview dinamik renkler
+    style.configure("Treeview", background=CARD_COLOR, fieldbackground=CARD_COLOR, foreground=FG_COLOR)
+    style.configure("Treeview.Heading", background=BG_COLOR, foreground=FG_COLOR, relief="flat")
+    style.map("Treeview", background=[("selected", ACCENT)], foreground=[("selected", "white")])
+    
+    # Menü scrollbari
     try:
         style.configure("Menu.Vertical.TScrollbar",
-                        background="#3a3a45",
-                        troughcolor="#2a2a35",
-                        bordercolor="#3a3a45",
-                        arrowcolor="#ffffff")
+                        background=CARD_COLOR,
+                        troughcolor=BG_COLOR,
+                        bordercolor=CARD_COLOR,
+                        arrowcolor=FG_COLOR)
         style.map("Menu.Vertical.TScrollbar",
-                   background=[("active", "#4a4a55"), ("pressed", "#5a5a66")])
+                   background=[("active", ACCENT), ("pressed", ACCENT)])
     except Exception:
         pass
 
@@ -107,6 +132,7 @@ def center_window(win, width: int, height: int):
 conn, cursor = get_connection()
 init_schema(conn, cursor)
 load_language_preference()
+load_theme_settings()
 
 # Yardımcı dönüştürücüler ve yardımcı fonksiyonlar
 def parse_float_safe(val, default: float | None = 0.0):
@@ -717,11 +743,11 @@ def mount_kategori(parent):
         set_theme(dialog)
         center_window(dialog, 400, 200)
 
-        tk.Label(dialog, text=t('category_name') + ":", bg=CARD_COLOR, fg="white").pack(pady=(16,4), padx=16, anchor="w")
+        tk.Label(dialog, text=t('category_name') + ":", bg=CARD_COLOR, fg=FG_COLOR).pack(pady=(16,4), padx=16, anchor="w")
         name_entry = ttk.Entry(dialog, width=40)
         name_entry.pack(pady=4, padx=16, fill="x")
 
-        tk.Label(dialog, text=t('category_color') + " (hex):", bg=CARD_COLOR, fg="white").pack(pady=(8,4), padx=16, anchor="w")
+        tk.Label(dialog, text=t('category_color') + " (hex):", bg=CARD_COLOR, fg=FG_COLOR).pack(pady=(8,4), padx=16, anchor="w")
         color_entry = ttk.Entry(dialog, width=40)
         color_entry.pack(pady=4, padx=16, fill="x")
         color_entry.insert(0, "#00b0ff")
@@ -767,12 +793,12 @@ def mount_kategori(parent):
         set_theme(dialog)
         center_window(dialog, 400, 200)
 
-        tk.Label(dialog, text=t('category_name') + ":", bg=CARD_COLOR, fg="white").pack(pady=(16,4), padx=16, anchor="w")
+        tk.Label(dialog, text=t('category_name') + ":", bg=CARD_COLOR, fg=FG_COLOR).pack(pady=(16,4), padx=16, anchor="w")
         name_entry = ttk.Entry(dialog, width=40)
         name_entry.pack(pady=4, padx=16, fill="x")
         name_entry.insert(0, cname)
 
-        tk.Label(dialog, text=t('category_color') + " (hex):", bg=CARD_COLOR, fg="white").pack(pady=(8,4), padx=16, anchor="w")
+        tk.Label(dialog, text=t('category_color') + " (hex):", bg=CARD_COLOR, fg=FG_COLOR).pack(pady=(8,4), padx=16, anchor="w")
         color_entry = ttk.Entry(dialog, width=40)
         color_entry.pack(pady=4, padx=16, fill="x")
         color_entry.insert(0, color)
@@ -869,7 +895,7 @@ def _mount_stok_islem(parent, mode: str = "in"):
     cb.grid(row=0, column=1, padx=8, pady=8, sticky="ew")
 
     # Depo Seçimi
-    ttk.Label(body, text="Depo:", font=("Segoe UI", 10, "bold")).grid(row=0, column=2, padx=8, pady=8, sticky="e")
+    ttk.Label(body, text=t('warehouse') + ":", font=("Segoe UI", 10, "bold")).grid(row=0, column=2, padx=8, pady=8, sticky="e")
     warehouses = wh_svc.list_warehouses(cursor)
     wh_map = {w[1]: w[0] for w in warehouses}
     wh_names = list(wh_map.keys())
@@ -1981,6 +2007,279 @@ def mount_cari_raporu(parent):
 def mount_kasa_raporu(parent):
     mount_kasa_rapor(parent)
 
+def mount_quick_menu_settings(parent):
+    from services import quick_menu_service as qms
+    from services import product_service as ps
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="⚡ " + t('quick_menu_title'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Sol: Liste
+    left_panel = ttk.Frame(content, style="Card.TFrame"); left_panel.pack(side="left", fill="both", expand=True, padx=(0,8))
+    
+    # Liste Filtresi
+    filter_frame = ttk.Frame(left_panel); filter_frame.pack(fill="x", padx=10, pady=10)
+    ttk.Label(filter_frame, text=t('list_code') + ":").pack(side="left", padx=5)
+    
+    LISTS = [
+        ("main",  t('main_list')),
+        ("list_1", t('list_1')),
+        ("list_2", t('list_2')),
+        ("list_3", t('list_3')),
+        ("list_4", t('list_4')),
+    ]
+    list_map = {l[1]: l[0] for l in LISTS}
+    list_names = list(list_map.keys())
+    
+    cb_list = ttk.Combobox(filter_frame, values=list_names, state="readonly", width=15)
+    cb_list.set(list_names[0])
+    cb_list.pack(side="left", padx=5)
+    
+    cols = ("name", "price", "sort")
+    tree = ttk.Treeview(left_panel, columns=cols, show="headings", height=15)
+    tree.heading("name", text=t('product_name')); tree.column("name", width=150)
+    tree.heading("price", text=t('button_price')); tree.column("price", width=80)
+    tree.heading("sort", text=t('sort_order')); tree.column("sort", width=50, anchor="center")
+    tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    # Sağ: Form
+    right_panel = ttk.Frame(content, style="Card.TFrame", width=300); right_panel.pack(side="right", fill="y")
+    right_panel.pack_propagate(False)
+    
+    lbl_form_title = ttk.Label(right_panel, text=t('add'), style="Header.TLabel")
+    lbl_form_title.pack(pady=10)
+    
+    # Ürün Arama
+    ttk.Label(right_panel, text=t('product_search')).pack(anchor="w", padx=10)
+    
+    def on_product_search(event):
+        if event.keysym in ('Up', 'Down', 'Return', 'Tab'): return
+        typed = cb_search.get()
+        if len(typed) < 2: return
+        results = ps.list_products(cursor, typed)
+        cb_search['values'] = [r[1] for r in results]
+        
+    def on_product_select(event=None):
+        name = cb_search.get()
+        if not name: return
+        results = ps.list_products(cursor, name)
+        
+        found = None
+        # 1. Tam eşleşme ara
+        for r in results:
+            if r[1] == name:
+                found = r
+                break
+        
+        # 2. Bulunamazsa ve sonuç varsa ilkini al (Enter ile seçim için)
+        if not found and results:
+            found = results[0]
+            
+        if found:
+            cb_search.set(found[1])
+            e_name.delete(0, tk.END); e_name.insert(0, found[1])
+            e_price.delete(0, tk.END); e_price.insert(0, f"{found[3]:.2f}")
+
+    cb_search = ttk.Combobox(right_panel)
+    cb_search.pack(fill="x", padx=10, pady=(0,10))
+    cb_search.bind('<KeyRelease>', on_product_search)
+    cb_search.bind('<<ComboboxSelected>>', on_product_select)
+    cb_search.bind('<Return>', on_product_select)
+    
+    ttk.Label(right_panel, text=t('product_name')).pack(anchor="w", padx=10)
+    e_name = ttk.Entry(right_panel); e_name.pack(fill="x", padx=10, pady=(0,10))
+    
+    ttk.Label(right_panel, text=t('button_price')).pack(anchor="w", padx=10)
+    e_price = ttk.Entry(right_panel); e_price.pack(fill="x", padx=10, pady=(0,10))
+    
+    ttk.Label(right_panel, text=t('sort_order')).pack(anchor="w", padx=10)
+    e_sort = ttk.Entry(right_panel); e_sort.pack(fill="x", padx=10, pady=(0,10))
+    e_sort.insert(0, "0")
+    
+    editing_id = tk.IntVar(value=0)
+    
+    def load_items(event=None):
+        for i in tree.get_children(): tree.delete(i)
+        sel_name = cb_list.get()
+        if not sel_name: return
+        code = list_map[sel_name]
+        
+        items = qms.list_quick_products(cursor, code)
+        for item in items:
+            # item: (id, list_code, name, price, sort_order)
+            tree.insert("", "end", text=str(item[0]), values=(item[2], f"{item[3]:.2f}", item[4]))
+            
+    def save_item():
+        name = e_name.get().strip()
+        try:
+            price = float(e_price.get().strip())
+            sort = int(e_sort.get().strip())
+        except ValueError:
+            messagebox.showerror(t('error'), t('invalid_amount'))
+            return
+            
+        if not name: return
+        
+        sel_name = cb_list.get()
+        code = list_map[sel_name]
+        
+        try:
+            if editing_id.get() > 0:
+                qms.update_quick_product(conn, cursor, editing_id.get(), code, name, price, sort)
+                messagebox.showinfo(t('success'), t('updated'))
+            else:
+                qms.add_quick_product(conn, cursor, code, name, price, sort)
+                messagebox.showinfo(t('success'), t('saved'))
+            
+            cancel_edit()
+            load_items()
+        except Exception as e:
+            messagebox.showerror(t('error'), str(e))
+            
+    def edit_item():
+        sel = tree.selection()
+        if not sel: return
+        item = tree.item(sel[0])
+        pid = int(item["text"])
+        vals = item["values"]
+        
+        editing_id.set(pid)
+        e_name.delete(0, tk.END); e_name.insert(0, vals[0])
+        e_price.delete(0, tk.END); e_price.insert(0, vals[1])
+        e_sort.delete(0, tk.END); e_sort.insert(0, vals[2])
+        
+        lbl_form_title.config(text=t('edit'))
+        btn_save.config(text="💾 " + t('update_btn'))
+        btn_cancel.pack(fill="x", padx=10, pady=5)
+        
+    def delete_item():
+        sel = tree.selection()
+        if not sel: return
+        if messagebox.askyesno(t('confirm'), t('confirm_delete')):
+            pid = int(tree.item(sel[0])["text"])
+            qms.delete_quick_product(conn, cursor, pid)
+            load_items()
+            if editing_id.get() == pid: cancel_edit()
+            
+    def cancel_edit():
+        editing_id.set(0)
+        e_name.delete(0, tk.END)
+        e_price.delete(0, tk.END)
+        e_sort.delete(0, tk.END); e_sort.insert(0, "0")
+        lbl_form_title.config(text=t('add'))
+        btn_save.config(text="💾 " + t('save'))
+        btn_cancel.pack_forget()
+        
+    btn_save = tk.Button(right_panel, text="💾 " + t('save'), command=save_item, bg=ACCENT, fg="white", relief="flat")
+    btn_save.pack(fill="x", padx=10, pady=10)
+    
+    btn_cancel = tk.Button(right_panel, text="❌ " + t('cancel_sale'), command=cancel_edit, bg="#e74c3c", fg="white", relief="flat")
+    
+    # Sol panel butonları
+    btn_frame = ttk.Frame(left_panel)
+    btn_frame.pack(fill="x", padx=10, pady=(0,10))
+    tk.Button(btn_frame, text="✏️ " + t('edit'), command=edit_item, bg="#f39c12", fg="white", relief="flat").pack(side="left", fill="x", expand=True, padx=(0,5))
+    tk.Button(btn_frame, text="🗑️ " + t('delete'), command=delete_item, bg="#e74c3c", fg="white", relief="flat").pack(side="left", fill="x", expand=True, padx=(5,0))
+    
+    cb_list.bind("<<ComboboxSelected>>", load_items)
+    load_items()
+
+
+def mount_theme_settings(parent):
+    from tkinter import colorchooser
+    
+    for w in parent.winfo_children(): w.destroy()
+    
+    header = ttk.Frame(parent, style="Card.TFrame"); header.pack(fill="x", padx=12, pady=(12,8))
+    ttk.Label(header, text="🎨 " + t('theme_settings'), style="Header.TLabel").pack(side="left", padx=8)
+    
+    content = ttk.Frame(parent, style="Card.TFrame"); content.pack(fill="both", expand=True, padx=12, pady=8)
+    
+    # Sol: Hazır Temalar
+    left_panel = ttk.Frame(content); left_panel.pack(side="left", fill="both", expand=True, padx=20, pady=20)
+    
+    ttk.Label(left_panel, text=t('theme_select'), style="Header.TLabel").pack(anchor="w", pady=(0,20))
+    
+    def apply_preset(bg, fg, sidebar, card, accent):
+        save_theme(bg, fg, sidebar, card, accent)
+        
+    def set_dark():
+        apply_preset("#18181c", "#ffffff", "#18181c", "#23232a", "#00b0ff")
+        
+    def set_light():
+        apply_preset("#f5f6fa", "#2c3e50", "#2c3e50", "#ffffff", "#3498db")
+        
+    tk.Button(left_panel, text="🌙 " + t('dark_theme'), command=set_dark, 
+              bg="#23232a", fg="white", font=("Segoe UI", 12), relief="flat", padx=20, pady=10).pack(fill="x", pady=5)
+              
+    tk.Button(left_panel, text="☀️ " + t('light_theme'), command=set_light, 
+              bg="#f5f6fa", fg="#2c3e50", font=("Segoe UI", 12), relief="flat", padx=20, pady=10).pack(fill="x", pady=5)
+              
+    # Sağ: Özel Renkler
+    right_panel = ttk.Frame(content); right_panel.pack(side="right", fill="both", expand=True, padx=20, pady=20)
+    
+    ttk.Label(right_panel, text=t('custom_theme'), style="Header.TLabel").pack(anchor="w", pady=(0,20))
+    
+    colors = {
+        "theme_bg": {"label": t('bg_color'), "val": BG_COLOR},
+        "theme_fg": {"label": t('fg_color'), "val": FG_COLOR},
+        "theme_sidebar": {"label": t('sidebar_color'), "val": SIDEBAR_COLOR},
+        "theme_card": {"label": t('card_color'), "val": CARD_COLOR},
+        "theme_accent": {"label": t('accent_color'), "val": ACCENT},
+    }
+    
+    entries = {}
+    
+    def pick_color(key):
+        curr = entries[key].get()
+        color = colorchooser.askcolor(color=curr, title=t('pick_color'))
+        if color[1]:
+            entries[key].delete(0, tk.END)
+            entries[key].insert(0, color[1])
+            entries[key].config(bg=color[1])
+            
+    for key, data in colors.items():
+        row = ttk.Frame(right_panel)
+        row.pack(fill="x", pady=5)
+        ttk.Label(row, text=data["label"], width=20).pack(side="left")
+        
+        e = tk.Entry(row, width=15)
+        e.insert(0, data["val"])
+        e.pack(side="left", padx=5)
+        try: e.config(bg=data["val"])
+        except: pass
+        entries[key] = e
+        
+        tk.Button(row, text="🎨", command=lambda k=key: pick_color(k), width=3).pack(side="left")
+        
+    def save_custom():
+        save_theme(
+            entries["theme_bg"].get(),
+            entries["theme_fg"].get(),
+            entries["theme_sidebar"].get(),
+            entries["theme_card"].get(),
+            entries["theme_accent"].get()
+        )
+        
+    def save_theme(bg, fg, sidebar, card, accent):
+        try:
+            cursor.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)", ("theme_bg", bg))
+            cursor.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)", ("theme_fg", fg))
+            cursor.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)", ("theme_sidebar", sidebar))
+            cursor.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)", ("theme_card", card))
+            cursor.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)", ("theme_accent", accent))
+            conn.commit()
+            messagebox.showinfo(t('success'), t('restart_required'))
+        except Exception as e:
+            messagebox.showerror(t('error'), str(e))
+
+    tk.Button(right_panel, text="💾 " + t('save'), command=save_custom, 
+              bg=ACCENT, fg="white", relief="flat", padx=20, pady=10).pack(fill="x", pady=20)
+
 
 def mount_users(parent):
     for w in parent.winfo_children(): w.destroy()
@@ -2002,8 +2301,8 @@ def mount_users(parent):
     tree.heading(t('role'), text=t('role')); tree.column(t('role'), anchor="center", width=200)
     
     # Zebrastripe
-    tree.tag_configure('oddrow', background='#1f1f25')
-    tree.tag_configure('evenrow', background='#252530')
+    tree.tag_configure('oddrow', background=BG_COLOR)
+    tree.tag_configure('evenrow', background=CARD_COLOR)
     
     original_insert = tree.insert
     def insert_with_tags(*args, **kwargs):
@@ -2133,8 +2432,8 @@ def mount_receipts(parent):
     tree.column(t('date'), width=200, anchor="center")
     
     # Zebrastripe
-    tree.tag_configure('oddrow', background='#1f1f25')
-    tree.tag_configure('evenrow', background='#252530')
+    tree.tag_configure('oddrow', background=BG_COLOR)
+    tree.tag_configure('evenrow', background=CARD_COLOR)
     
     original_insert = tree.insert
     def insert_with_tags(*args, **kwargs):
@@ -2272,8 +2571,8 @@ def mount_reports(parent):
     tree.heading(t('total'), text=t('total')); tree.column(t('total'), width=110, anchor="e")
     
     # Zebrastripe
-    tree.tag_configure('oddrow', background='#1f1f25')
-    tree.tag_configure('evenrow', background='#252530')
+    tree.tag_configure('oddrow', background=BG_COLOR)
+    tree.tag_configure('evenrow', background=CARD_COLOR)
     
     original_insert = tree.insert
     def insert_with_tags(*args, **kwargs):
@@ -2550,8 +2849,8 @@ def mount_cariler(parent):
     tree.column(t('cari_type'), anchor="center", width=100)
     
     # Zebrastripe
-    tree.tag_configure('oddrow', background='#1f1f25')
-    tree.tag_configure('evenrow', background='#252530')
+    tree.tag_configure('oddrow', background=BG_COLOR)
+    tree.tag_configure('evenrow', background=CARD_COLOR)
     tree.tag_configure('positive', foreground='#10b981')
     tree.tag_configure('negative', foreground='#ef4444')
     
@@ -2815,7 +3114,7 @@ def mount_sales(parent):
     wh_names = list(wh_map.keys())
     selected_wh_id = tk.IntVar(value=warehouses[0][0] if warehouses else 1)
 
-    tk.Label(wh_frame, text="Depo:", bg=BG_COLOR, fg="white", font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 5))
+    tk.Label(wh_frame, text=t('warehouse') + ":", bg=BG_COLOR, fg=FG_COLOR, font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 5))
     wh_cb = ttk.Combobox(wh_frame, values=wh_names, state="readonly", width=15, font=("Segoe UI", 10))
     if wh_names:
         wh_cb.set(wh_names[0])
@@ -2832,7 +3131,7 @@ def mount_sales(parent):
     barcode_frame = tk.Frame(top_section, bg=CARD_COLOR, relief="flat", bd=1)
     barcode_frame.pack(side="left", fill="x", expand=True, padx=(0,8))
     
-    tk.Label(barcode_frame, text="📷", font=("Segoe UI", 16), bg=CARD_COLOR, fg="white").pack(side="left", padx=10)
+    tk.Label(barcode_frame, text="📷", font=("Segoe UI", 16), bg=CARD_COLOR, fg=FG_COLOR).pack(side="left", padx=10)
     barcode_entry = tk.Entry(barcode_frame, font=("Segoe UI", 14), bg="#ffffff", fg="#333333",
                              insertbackground="#000000", relief="flat", bd=0)
     barcode_entry.pack(side="left", fill="both", expand=True, padx=0, pady=8, ipady=6)
@@ -3048,7 +3347,7 @@ def mount_sales(parent):
     product_header = tk.Frame(left_panel, bg=CARD_COLOR)
     product_header.pack(fill="x", padx=8, pady=8)
     product_count_label = tk.Label(product_header, text=t('products') + " 🗂️ 0", font=("Segoe UI", 12, "bold"),
-             bg=CARD_COLOR, fg="white")
+             bg=CARD_COLOR, fg=FG_COLOR)
     product_count_label.pack(side="left")
     
     tk.Button(product_header, text=t('add'), font=("Segoe UI", 9), bg="#6c757d", fg="white",
@@ -3071,8 +3370,8 @@ def mount_sales(parent):
     product_tree.column(t('price'), width=120, anchor="center", stretch=False)
     product_tree.column(t('total'), width=100, anchor="e", stretch=False)
     
-    product_tree.tag_configure('oddrow', background='#1f1f25')
-    product_tree.tag_configure('evenrow', background='#252530')
+    product_tree.tag_configure('oddrow', background=BG_COLOR)
+    product_tree.tag_configure('evenrow', background=CARD_COLOR)
 
     # Miktar hücresi inline editor (Frame) referansı
     qty_editor_frame = None
@@ -3154,7 +3453,7 @@ def mount_sales(parent):
         # Frame yarat veya kullan
         frame = qty_frames.get(item_id)
         if frame is None or not frame.winfo_exists():
-            frame = tk.Frame(product_tree, bg="#f5e4c8", highlightbackground="black", highlightthickness=1)
+            frame = tk.Frame(product_tree, bg=CARD_COLOR, highlightbackground="black", highlightthickness=1)
             qty_frames[item_id] = frame
             qty_var = tk.DoubleVar(value=current_qty)
 
@@ -3199,7 +3498,7 @@ def mount_sales(parent):
             frame.columnconfigure(1, weight=1)
             btn_minus = tk.Button(frame, text="-", font=("Segoe UI", 10, "bold"), bg="#dc3545", fg="white", bd=0, cursor="hand2", command=dec)
             btn_plus = tk.Button(frame, text="+", font=("Segoe UI", 10, "bold"), bg="#28a745", fg="white", bd=0, cursor="hand2", command=inc)
-            qty_entry = tk.Entry(frame, justify="center", font=("Segoe UI", 10, "bold"), bg="#f5e4c8", fg="#000", relief="flat")
+            qty_entry = tk.Entry(frame, justify="center", font=("Segoe UI", 10, "bold"), bg=CARD_COLOR, fg=FG_COLOR, relief="flat")
             qty_entry.insert(0, format_qty(current_qty))
             btn_minus.grid(row=0, column=0, sticky="nsw", padx=(0,0))
             qty_entry.grid(row=0, column=1, sticky="nsew")
@@ -3259,7 +3558,7 @@ def mount_sales(parent):
 
         frame = price_frames.get(item_id)
         if frame is None or not frame.winfo_exists():
-            frame = tk.Frame(product_tree, bg="#f5e4c8", highlightbackground="black", highlightthickness=1)
+            frame = tk.Frame(product_tree, bg=CARD_COLOR, highlightbackground="black", highlightthickness=1)
             price_frames[item_id] = frame
             price_var = tk.DoubleVar(value=current_price)
 
@@ -3300,7 +3599,7 @@ def mount_sales(parent):
             frame.columnconfigure(1, weight=1)
             btn_minus = tk.Button(frame, text="-", font=("Segoe UI", 10, "bold"), bg="#dc3545", fg="white", bd=0, cursor="hand2", command=dec)
             btn_plus = tk.Button(frame, text="+", font=("Segoe UI", 10, "bold"), bg="#28a745", fg="white", bd=0, cursor="hand2", command=inc)
-            price_entry = tk.Entry(frame, justify="center", font=("Segoe UI", 10, "bold"), bg="#f5e4c8", fg="#000", relief="flat")
+            price_entry = tk.Entry(frame, justify="center", font=("Segoe UI", 10, "bold"), bg=CARD_COLOR, fg=FG_COLOR, relief="flat")
             price_entry.insert(0, format_price(current_price))
             btn_minus.grid(row=0, column=0, sticky="nsw")
             price_entry.grid(row=0, column=1, sticky="nsew")
@@ -3441,7 +3740,7 @@ def mount_sales(parent):
     info_grid.pack(fill="x", padx=12, pady=12)
     
     tk.Label(info_grid, text=t('paid'), font=("Segoe UI", 10), bg=CARD_COLOR, fg=TEXT_GRAY).grid(row=0, column=0, sticky="w", pady=2)
-    paid_label = tk.Label(info_grid, text="0", font=("Segoe UI", 18, "bold"), bg=CARD_COLOR, fg="white")
+    paid_label = tk.Label(info_grid, text="0", font=("Segoe UI", 18, "bold"), bg=CARD_COLOR, fg=FG_COLOR)
     paid_label.grid(row=1, column=0, sticky="w", pady=2)
     
     tk.Label(info_grid, text=t('total').upper() + " :", font=("Segoe UI", 12), bg=CARD_COLOR, fg=TEXT_GRAY).grid(row=0, column=1, sticky="e", padx=20, pady=2)
@@ -4355,7 +4654,7 @@ def mount_sales(parent):
         # İkon ve Başlık
         tk.Label(content, text="❓", font=("Segoe UI", 48), bg=BG_COLOR, fg="#17a2b8").pack()
         tk.Label(content, text=t('confirm'), font=("Segoe UI", 16, "bold"), 
-                 bg=BG_COLOR, fg="white").pack(pady=(10, 5))
+                 bg=BG_COLOR, fg=FG_COLOR).pack(pady=(10, 5))
         
         # Bilgi
         info_frame = tk.Frame(content, bg=BG_COLOR)
@@ -4364,7 +4663,7 @@ def mount_sales(parent):
         tk.Label(info_frame, text=f"{t('total')}: {total_amount:.2f} ₺", font=("Segoe UI", 12, "bold"), 
                  bg=BG_COLOR, fg="#ffc107").pack(pady=5)
         tk.Label(info_frame, text=f"{t('customer')}: {customer_name}", font=("Segoe UI", 10), 
-                 bg=BG_COLOR, fg=TEXT_GRAY).pack()
+                 bg=BG_COLOR, fg=FG_COLOR).pack()
         
         # Butonlar Container
         btn_container = tk.Frame(content, bg=BG_COLOR)
@@ -4427,13 +4726,13 @@ def mount_sales(parent):
 
         # Description
         desc = "Parçalı ödeme almak için aşağıdaki formu doldurunuz. Parçalı ödeme \"Açık Hesap\" kaydedilmektedir. Kalan tutar müşteri hesabına borç olarak yazılacaktır."
-        tk.Label(dialog, text=desc, font=("Segoe UI", 10), bg=BG_COLOR, fg="white", wraplength=550, justify="left").pack(pady=10, padx=20)
+        tk.Label(dialog, text=desc, font=("Segoe UI", 10), bg=BG_COLOR, fg=FG_COLOR, wraplength=550, justify="left").pack(pady=10, padx=20)
 
         form_frame = tk.Frame(dialog, bg=BG_COLOR)
         form_frame.pack(pady=10)
 
         # Styles
-        lbl_style = {"font": ("Segoe UI", 14, "bold"), "bg": BG_COLOR, "fg": "white", "anchor": "e"}
+        lbl_style = {"font": ("Segoe UI", 14, "bold"), "bg": BG_COLOR, "fg": FG_COLOR, "anchor": "e"}
         entry_font = ("Segoe UI", 14)
 
         # TOTAL
@@ -4719,8 +5018,8 @@ def mount_cancel_sales(parent):
     tree.column(t('payment_method'), width=150, anchor="center")
     
     # Zebrastripe
-    tree.tag_configure('oddrow', background='#1f1f25')
-    tree.tag_configure('evenrow', background='#252530')
+    tree.tag_configure('oddrow', background=BG_COLOR)
+    tree.tag_configure('evenrow', background=CARD_COLOR)
     
     original_insert = tree.insert
     def insert_with_tags(*args, **kwargs):
@@ -4858,7 +5157,7 @@ def show_custom_confirm_dialog(title, message, parent=None):
     
     # Mesaj
     tk.Label(content, text=message, font=("Segoe UI", 11, "bold"), 
-             bg=BG_COLOR, fg="white", wraplength=350).pack(pady=(0, 20))
+             bg=BG_COLOR, fg=FG_COLOR, wraplength=350).pack(pady=(0, 20))
     
     # Butonlar
     btn_frame = tk.Frame(content, bg=BG_COLOR)
@@ -5113,7 +5412,7 @@ def open_main_window(role, username):
     header_bar.pack(fill="x", padx=0, pady=(12,6))
     header_label = ttk.Label(header_bar, text="📂 " + t('action_menu'), style="Header.TLabel")
     header_label.pack(side="left", padx=(8,0))
-    collapse_btn = tk.Button(header_bar, text="◀", bg=CARD_COLOR, fg="white",
+    collapse_btn = tk.Button(header_bar, text="◀", bg=CARD_COLOR, fg=FG_COLOR,
                              relief="flat", padx=8, pady=4, cursor="hand2", borderwidth=0)
     collapse_btn.pack(side="right", padx=(0,8))
     # ttk.Separator(menu_container, orient="horizontal").pack(fill="x", padx=10, pady=(0,6))  # kullanıcı isteğiyle kaldırıldı
@@ -5197,8 +5496,8 @@ def open_main_window(role, username):
     top_buttons = []
 
     def mbtn(parent, text, cmd):
-        b = tk.Button(parent, text=text, bg=CARD_COLOR, fg="white",
-                      font=("Segoe UI",10,"bold"), activebackground="#003c66",
+        b = tk.Button(parent, text=text, bg=CARD_COLOR, fg=FG_COLOR,
+                      font=("Segoe UI",10,"bold"), activebackground=ACCENT,
                       activeforeground="white", relief="flat", padx=10, pady=10,
                       anchor="w", borderwidth=0, command=cmd)
         b.pack(fill="x", pady=4, padx=14)
@@ -5218,8 +5517,8 @@ def open_main_window(role, username):
 
     # Alt menü butonu (daha küçük ve içeriden)
     def msub(parent, text, cmd):
-        b = tk.Button(parent, text="   • " + text, bg=CARD_COLOR, fg="white",
-                      font=("Segoe UI",9), activebackground="#003c66",
+        b = tk.Button(parent, text="   • " + text, bg=CARD_COLOR, fg=FG_COLOR,
+                      font=("Segoe UI",9), activebackground=ACCENT,
                       activeforeground="white", relief="flat", padx=10, pady=8,
                       anchor="w", borderwidth=0, command=cmd)
         b.pack(fill="x", pady=2, padx=30)
@@ -5363,6 +5662,22 @@ def open_main_window(role, username):
         # Diğer menüler
         mbtn(menu, "🧾 " + t('receipts'), lambda: mount_receipts(right_panel))
         mbtn(menu, "💾 " + t('daily_report'), export_daily_report)
+        
+        # Ayarlar Menüsü
+        settings_header = mbtn(menu, "⚙️ " + t('settings'), None)
+        settings_sub = ttk.Frame(menu, style="Card.TFrame")
+        settings_visible = {"v": False}
+        def toggle_settings():
+            if settings_visible["v"]:
+                settings_sub.pack_forget(); settings_visible["v"] = False
+            else:
+                open_section(settings_header, settings_sub, settings_visible)
+        settings_header.config(command=toggle_settings)
+        register_section(settings_header, settings_sub, settings_visible)
+        
+        msub(settings_sub, t('quick_menu_settings'), lambda: mount_quick_menu_settings(right_panel))
+        msub(settings_sub, t('theme_settings'), lambda: mount_theme_settings(right_panel))
+        
     else:
         mbtn(menu, "🛒 " + t('sales'), lambda: mount_sales(right_panel))
         mbtn(menu, "🛑 " + t('cancel_sale'), lambda: mount_cancel_sales(right_panel))
