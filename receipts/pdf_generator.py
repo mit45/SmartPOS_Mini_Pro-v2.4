@@ -28,7 +28,8 @@ def get_business_settings():
             'company_phone': get_val('company_phone', ''),
             'tax_office': get_val('tax_office', ''),
             'tax_number': get_val('tax_number', ''),
-            'receipt_footer': get_val('receipt_footer', 'Teşekkür ederiz')
+            'receipt_footer': get_val('receipt_footer', 'Teşekkür ederiz'),
+            'currency': get_val('currency', '₺')
         }
         conn.close()
         return settings
@@ -39,7 +40,8 @@ def get_business_settings():
             'company_phone': '',
             'tax_office': '',
             'tax_number': '',
-            'receipt_footer': 'Teşekkür ederiz'
+            'receipt_footer': 'Teşekkür ederiz',
+            'currency': '₺'
         }
 
 
@@ -204,21 +206,21 @@ def print_receipt(
 
         # Ara toplam
         c.setFont(font_name, 11)
-        c.drawString(right - 90*mm, y, f"Ara Toplam:: {subtotal_net:.2f} TL")
+        c.drawString(right - 90*mm, y, f"Ara Toplam:: {subtotal_net:.2f} {biz['currency']}")
         y -= 6*mm
         
         # İndirim (varsa)
         if discount_rate > 0:
-            c.drawString(right - 90*mm, y, f"İndirim ({float(discount_rate):.1f}%): -{discount_amt:.2f} TL")
+            c.drawString(right - 90*mm, y, f"İndirim ({float(discount_rate):.1f}%): -{discount_amt:.2f} {biz['currency']}")
             y -= 6*mm
         
         # KDV
-        c.drawString(right - 90*mm, y, f"KDV ({rate:.1f}%): +{kdv_amt:.2f} TL")
+        c.drawString(right - 90*mm, y, f"KDV ({rate:.1f}%): +{kdv_amt:.2f} {biz['currency']}")
         y -= 10*mm
 
         # Genel Toplam (kalın ve büyük)
         c.setFont(bold_font_name, 14)
-        c.drawString(right - 90*mm, y, f"Genel Toplam:: {grand_total:.2f} TL")
+        c.drawString(right - 90*mm, y, f"Genel Toplam:: {grand_total:.2f} {biz['currency']}")
         y -= 12*mm
 
         # Alt bilgi (footer)

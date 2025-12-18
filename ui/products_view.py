@@ -19,22 +19,31 @@ def mount_products(parent, conn, cursor, t,
 
     # Ana gövde: sol tarafta liste, sağ tarafta tek sayfa form
     body = ttk.Frame(parent, style="Card.TFrame"); body.pack(fill="both", expand=True, padx=12, pady=8)
-    left = ttk.Frame(body, style="Card.TFrame"); left.pack(side="left", fill="both", expand=True, padx=(8,4), pady=8)
-    right = ttk.Frame(body, style="Card.TFrame"); right.pack(side="left", fill="y", padx=(4,8), pady=8)
+    
+    # Grid Layout Kullanımı (Daha stabil yerleşim için)
+    body.columnconfigure(0, weight=1) # Sol taraf genişleyebilir
+    body.columnconfigure(1, weight=0) # Sağ taraf sabit
+    body.rowconfigure(0, weight=1)
+
+    left = ttk.Frame(body, style="Card.TFrame")
+    left.grid(row=0, column=0, sticky="nsew", padx=(8,4), pady=8)
+    
+    right = ttk.Frame(body, style="Card.TFrame")
+    right.grid(row=0, column=1, sticky="ns", padx=(4,8), pady=8)
 
     # Liste kolonları: ID, Ad, Barkod, Satış Fiyatı, Stok, Birim, Alış Fiyatı, Kategori
     cols = (t('seq'), t('name'), t('barcode'), t('sale_price'), t('stock'), t('unit'), t('buy_price'), t('category'))
     tree = ttk.Treeview(left, columns=cols, show="headings")
     for c in cols:
         tree.heading(c, text=c)
-    tree.column(t('seq'), width=60, anchor="center")
-    tree.column(t('name'), anchor="w", width=160)
-    tree.column(t('barcode'), anchor="w", width=100)
-    tree.column(t('sale_price'), anchor="e", width=90)
-    tree.column(t('stock'), anchor="center", width=80)
-    tree.column(t('unit'), anchor="center", width=60)
-    tree.column(t('buy_price'), anchor="e", width=100)
-    tree.column(t('category'), anchor="center", width=100)
+    tree.column(t('seq'), width=50, anchor="center", stretch=False)
+    tree.column(t('name'), anchor="w", width=200, stretch=True)
+    tree.column(t('barcode'), anchor="w", width=120, stretch=False)
+    tree.column(t('sale_price'), anchor="e", width=100, stretch=False)
+    tree.column(t('stock'), anchor="center", width=80, stretch=False)
+    tree.column(t('unit'), anchor="center", width=60, stretch=False)
+    tree.column(t('buy_price'), anchor="e", width=100, stretch=False)
+    tree.column(t('category'), anchor="center", width=120, stretch=False)
     tree.pack(fill="both", expand=True, padx=10, pady=10)
 
     # Tek sayfa form (sağ panel) - Modern ve renkli

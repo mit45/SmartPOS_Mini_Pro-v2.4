@@ -27,6 +27,7 @@ APP_VERSION = "v2.4"
 # Dil Sistemi (Yeni)
 # ==========================
 CURRENT_LANGUAGE = "tr"
+CURRENT_CURRENCY = "₺" # Varsayılan para birimi
 CURRENT_USER = ""
 PARTIAL_PAYMENT_DATA = {}
 
@@ -46,6 +47,17 @@ def set_language(lang_code: str):
     except Exception:
         pass
 
+def set_currency(symbol: str):
+    """Para birimini değiştir ve ayarı veritabanına yaz."""
+    global CURRENT_CURRENCY
+    CURRENT_CURRENCY = symbol
+    try:
+        cursor.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)")
+        cursor.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('currency', ?)", (symbol,))
+        conn.commit()
+    except Exception:
+        pass
+
 def load_language_preference():
     """Kaydedilmiş dil tercihini yükle - Load saved language preference"""
     global CURRENT_LANGUAGE
@@ -55,6 +67,18 @@ def load_language_preference():
         result = cursor.fetchone()
         if result:
             CURRENT_LANGUAGE = result[0]
+    except Exception:
+        pass
+
+def load_currency_preference():
+    """Kaydedilmiş para birimi tercihini yükle"""
+    global CURRENT_CURRENCY
+    try:
+        cursor.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)")
+        cursor.execute("SELECT value FROM settings WHERE key='currency'")
+        result = cursor.fetchone()
+        if result:
+            CURRENT_CURRENCY = result[0]
     except Exception:
         pass
 
@@ -132,6 +156,7 @@ def center_window(win, width: int, height: int):
 conn, cursor = get_connection()
 init_schema(conn, cursor)
 load_language_preference()
+load_currency_preference()
 load_theme_settings()
 
 # Yardımcı dönüştürücüler ve yardımcı fonksiyonlar
@@ -390,9 +415,9 @@ def _mount_purchase_screen(parent, doc_type):
         for idx, item in enumerate(items_data, 1):
             tree.insert("", "end", text=str(item['product_id']), values=(idx, item['name'], item['qty'], item['price'], item['total']))
             grand_total += item['total']
-        lbl_total.config(text=f"{t('total')}: {grand_total:.2f} ₺")
+        lbl_total.config(text=f"{t('total')}: {grand_total:.2f} {CURRENT_CURRENCY}")
         
-    lbl_total = ttk.Label(list_frame, text="Total: 0.00 ₺", font=("Segoe UI", 14, "bold"))
+    lbl_total = ttk.Label(list_frame, text=f"Total: 0.00 {CURRENT_CURRENCY}", font=("Segoe UI", 14, "bold"))
     lbl_total.pack(pady=10)
     
     def save_doc():
@@ -477,7 +502,7 @@ def _mount_purchase_list(parent, doc_type):
         docs = purchase_svc.list_documents(cursor, doc_type)
         for idx, d in enumerate(docs, 1):
             # d: (id, supplier_name, doc_type, doc_number, doc_date, total_amount, description)
-            tree.insert("", "end", text=str(d[0]), values=(idx, d[1] or "-", d[3], d[4], f"{d[5]:.2f} ₺", d[6] or ""))
+            tree.insert("", "end", text=str(d[0]), values=(idx, d[1] or "-", d[3], d[4], f"{d[5]:.2f} {CURRENT_CURRENCY}", d[6] or ""))
     load_data()
         
     # Detail view on double click
@@ -549,7 +574,7 @@ def show_purchase_details(parent, doc_id):
     ttk.Label(header_frame, text=f"{t('supplier_list')}: {supplier_name}", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, padx=10, pady=5, sticky="w")
     ttk.Label(header_frame, text=f"Belge No: {doc[3]}", font=("Segoe UI", 10)).grid(row=0, column=1, padx=10, pady=5, sticky="w")
     ttk.Label(header_frame, text=f"{t('date')}: {doc[4]}", font=("Segoe UI", 10)).grid(row=0, column=2, padx=10, pady=5, sticky="w")
-    ttk.Label(header_frame, text=f"{t('total')}: {doc[5]:.2f} ₺", font=("Segoe UI", 12, "bold"), foreground=ACCENT).grid(row=0, column=3, padx=10, pady=5, sticky="w")
+    ttk.Label(header_frame, text=f"{t('total')}: {doc[5]:.2f} {CURRENT_CURRENCY}", font=("Segoe UI", 12, "bold"), foreground=ACCENT).grid(row=0, column=3, padx=10, pady=5, sticky="w")
 
     # Items List
     list_frame = ttk.Frame(dialog, style="Card.TFrame")
@@ -651,7 +676,7 @@ def _mount_purchase_edit(parent, doc_id):
     tree.heading("total", text=t('total')); tree.column("total", width=100)
     tree.pack(fill="both", expand=True, padx=10, pady=10)
     
-    lbl_total = ttk.Label(list_frame, text="Total: 0.00 ₺", font=("Segoe UI", 14, "bold"))
+    lbl_total = ttk.Label(list_frame, text=f"Total: 0.00 {CURRENT_CURRENCY}", font=("Segoe UI", 14, "bold"))
     lbl_total.pack(pady=10)
 
     def refresh_list():
@@ -660,7 +685,7 @@ def _mount_purchase_edit(parent, doc_id):
         for idx, item in enumerate(items_data, 1):
             tree.insert("", "end", text=str(item['product_id']), values=(idx, item['name'], item['qty'], item['price'], item['total']))
             grand_total += item['total']
-        lbl_total.config(text=f"{t('total')}: {grand_total:.2f} ₺")
+        lbl_total.config(text=f"{t('total')}: {grand_total:.2f} {CURRENT_CURRENCY}")
 
     refresh_list()
 
@@ -1537,8 +1562,36 @@ def _mount_cari_islem(parent, mode: str):
         row = next((c for c in cariler if c[1]==name), None)
         if not row:
             return
+        
+        def translate_desc(d):
+            if not d: return ""
+            d = str(d)
+            # Prefix replacements for known auto-generated descriptions
+            # Keys are the Turkish prefixes stored in DB
+            replacements = {
+                "DÜZELTME/İPTAL - Fatura:": t('prefix_correction'),
+                "GÜNCELLEME - Fatura:": t('prefix_update'),
+                "Alış Faturası:": t('prefix_purchase_invoice'),
+                "Satış Fişi:": t('prefix_sales_receipt'),
+                "Satış Fişi (Parçalı):": t('prefix_sales_receipt_partial'),
+                "Nakit Ödeme": t('prefix_cash_payment'),
+                "Kredi Kartı Ödemesi": t('prefix_cc_payment')
+            }
+            
+            # Only translate if current language is NOT Turkish (assuming DB has Turkish)
+            if CURRENT_LANGUAGE != "tr":
+                for k, v in replacements.items():
+                    if d.startswith(k):
+                        return d.replace(k, v)
+            return d
+
         for idx, (mid, typ, tutar, acik, created) in enumerate(cs.list_hareketler(cursor, row[0]), 1):
-            tree.insert("", "end", text=str(mid), values=(idx, str(created), str(typ), f"{float(tutar):.2f}", str(acik or "")))
+            # Translate transaction type
+            typ_disp = t(typ) if typ in ["borc", "alacak", "tahsilat", "odeme"] else typ
+            # Translate description
+            acik_disp = translate_desc(acik)
+            
+            tree.insert("", "end", text=str(mid), values=(idx, str(created), typ_disp, f"{float(tutar):.2f}", acik_disp))
 
     cb.bind("<<ComboboxSelected>>", lambda *_: load_moves())
     if cari_names:
@@ -2132,9 +2185,23 @@ def mount_depo_hareket(parent):
     tree.pack(fill="both", expand=True, padx=10, pady=10)
     
     moves = ws.list_movements(cursor)
+
+    def translate_wh_desc(raw_desc):
+        if CURRENT_LANGUAGE == 'tr': return raw_desc
+        if not raw_desc: return ""
+        
+        if raw_desc == "Açılış Stoğu":
+            return t('initial_stock')
+        
+        if raw_desc.startswith("Satın Alma:"):
+            return raw_desc.replace("Satın Alma:", t('prefix_purchase'), 1)
+            
+        return raw_desc
+
     for m in moves:
         # m: (id, source, target, product, qty, date, desc, username)
-        tree.insert("", "end", text=str(m[0]), values=(m[5], m[1] or "-", m[2] or "-", m[3], m[4], m[6], m[7]))
+        desc_disp = translate_wh_desc(m[6])
+        tree.insert("", "end", text=str(m[0]), values=(m[5], m[1] or "-", m[2] or "-", m[3], m[4], desc_disp, m[7]))
 
 def mount_depo_stok_listesi(parent):
     from services import warehouse_service as ws
@@ -2254,10 +2321,58 @@ def mount_kasa_hareket(parent):
         t_in = 0.0
         t_out = 0.0
         
+        # Translation maps
+        type_map = {
+            'Satış': 'sale_type',
+            'Cari Tahsilat': 'account_collection_type',
+            'Cari Ödeme': 'account_payment_type',
+            'Masraf': 'expense_type'
+        }
+        dir_map = {
+            'Giriş': 'entry_direction',
+            'Çıkış': 'exit_direction'
+        }
+
+        def translate_desc(raw_desc):
+            if CURRENT_LANGUAGE == 'tr': return raw_desc
+            if not raw_desc: return ""
+            
+            replacements = {
+                "DÜZELTME/İPTAL": t('prefix_correction'),
+                "GÜNCELLEME": t('prefix_update'),
+                "Alış Faturası": t('prefix_purchase_invoice'),
+                "Satış Fişi (Parçalı)": t('prefix_sales_receipt_partial'),
+                "Satış Fişi": t('prefix_sales_receipt'),
+                "Nakit Ödeme": t('prefix_cash_payment'),
+                "Kredi Kartı Ödeme": t('prefix_cc_payment')
+            }
+            
+            val = raw_desc
+            for k, v in replacements.items():
+                if val.startswith(k):
+                    val = val.replace(k, v, 1)
+                    break
+            return val
+
         for m in moves:
             # m: {id, date, type, amount, direction, desc}
-            tree.insert("", "end", values=(m['date'], m['type'], m['desc'], f"{m['amount']:.2f}", m['direction']))
-            if m['direction'] == 'Giriş':
+            
+            # Translate Type
+            m_type = m['type']
+            if m_type in type_map:
+                m_type = t(type_map[m_type])
+            
+            # Translate Direction
+            m_dir_raw = m['direction']
+            m_dir_disp = m_dir_raw
+            if m_dir_raw in dir_map:
+                m_dir_disp = t(dir_map[m_dir_raw])
+            
+            # Translate Desc
+            m_desc = translate_desc(m['desc'])
+
+            tree.insert("", "end", values=(m['date'], m_type, m_desc, f"{m['amount']:.2f}", m_dir_disp))
+            if m_dir_raw == 'Giriş':
                 t_in += m['amount']
             else:
                 t_out += m['amount']
@@ -2290,17 +2405,17 @@ def mount_kasa_devir(parent):
     ttk.Label(f_summary, text=f"{t('date_lbl')}: {today}", font=("Segoe UI", 14, "bold")).grid(row=0, column=0, columnspan=2, pady=20)
     
     ttk.Label(f_summary, text=f"{t('total_in_lbl')}:", font=("Segoe UI", 12)).grid(row=1, column=0, padx=20, pady=10, sticky="e")
-    ttk.Label(f_summary, text=f"{summary['in']:.2f} ₺", font=("Segoe UI", 12, "bold"), foreground="green").grid(row=1, column=1, padx=20, pady=10, sticky="w")
+    ttk.Label(f_summary, text=f"{summary['in']:.2f} {CURRENT_CURRENCY}", font=("Segoe UI", 12, "bold"), foreground="green").grid(row=1, column=1, padx=20, pady=10, sticky="w")
     
     ttk.Label(f_summary, text=f"{t('total_out_lbl')}:", font=("Segoe UI", 12)).grid(row=2, column=0, padx=20, pady=10, sticky="e")
-    ttk.Label(f_summary, text=f"{summary['out']:.2f} ₺", font=("Segoe UI", 12, "bold"), foreground="red").grid(row=2, column=1, padx=20, pady=10, sticky="w")
+    ttk.Label(f_summary, text=f"{summary['out']:.2f} {CURRENT_CURRENCY}", font=("Segoe UI", 12, "bold"), foreground="red").grid(row=2, column=1, padx=20, pady=10, sticky="w")
     
     ttk.Label(f_summary, text=f"{t('end_day_balance')}:", font=("Segoe UI", 14, "bold")).grid(row=3, column=0, padx=20, pady=20, sticky="e")
-    ttk.Label(f_summary, text=f"{summary['balance']:.2f} ₺", font=("Segoe UI", 14, "bold"), foreground="#00b0ff").grid(row=3, column=1, padx=20, pady=20, sticky="w")
+    ttk.Label(f_summary, text=f"{summary['balance']:.2f} {CURRENT_CURRENCY}", font=("Segoe UI", 14, "bold"), foreground="#00b0ff").grid(row=3, column=1, padx=20, pady=20, sticky="w")
     
     def close_day():
         # Basitçe bir rapor oluşturup kaydedebiliriz veya sadece mesaj gösterebiliriz
-        messagebox.showinfo(t('success'), f"{today} {t('close_day_success')}: {summary['balance']:.2f} ₺")
+        messagebox.showinfo(t('success'), f"{today} {t('close_day_success')}: {summary['balance']:.2f} {CURRENT_CURRENCY}")
         
     tk.Button(content, text="✅ " + t('close_day_btn'), command=close_day,
               bg="#28a745", fg="white", font=("Segoe UI", 12, "bold"),
@@ -2348,18 +2463,18 @@ def mount_kasa_rapor(parent):
         report = f"{t('cash_report_title')}\n"
         report += f"{t('date_range')}: {s_date} - {e_date}\n"
         report += "-" * 40 + "\n"
-        report += f"{t('total_sales_cash')}: {total_sales:10.2f} ₺\n"
-        report += f"{t('total_collection')}:      {total_collection:10.2f} ₺\n"
+        report += f"{t('total_sales_cash')}: {total_sales:10.2f} {CURRENT_CURRENCY}\n"
+        report += f"{t('total_collection')}:      {total_collection:10.2f} {CURRENT_CURRENCY}\n"
         report += "-" * 40 + "\n"
-        report += f"{t('total_inflow')}:         {total_sales + total_collection:10.2f} ₺\n\n"
+        report += f"{t('total_inflow')}:         {total_sales + total_collection:10.2f} {CURRENT_CURRENCY}\n\n"
         
-        report += f"{t('total_payment')}:         {total_payment:10.2f} ₺\n"
-        report += f"{t('total_expense')}:        {total_expense:10.2f} ₺\n"
+        report += f"{t('total_payment')}:         {total_payment:10.2f} {CURRENT_CURRENCY}\n"
+        report += f"{t('total_expense')}:        {total_expense:10.2f} {CURRENT_CURRENCY}\n"
         report += "-" * 40 + "\n"
-        report += f"{t('total_outflow')}:         {total_payment + total_expense:10.2f} ₺\n\n"
+        report += f"{t('total_outflow')}:         {total_payment + total_expense:10.2f} {CURRENT_CURRENCY}\n\n"
         
         report += "=" * 40 + "\n"
-        report += f"{t('net_balance_cap')}:           {(total_sales + total_collection) - (total_payment + total_expense):10.2f} ₺\n"
+        report += f"{t('net_balance_cap')}:           {(total_sales + total_collection) - (total_payment + total_expense):10.2f} {CURRENT_CURRENCY}\n"
         
         txt_report.delete("1.0", tk.END)
         txt_report.insert("1.0", report)
@@ -2400,9 +2515,9 @@ def mount_stok_raporu(parent):
 
     make_card(summary_frame, t('product_count'), str(total_items), "white")
     make_card(summary_frame, t('total_stock'), f"{total_qty:.2f}", "#00b0ff")
-    make_card(summary_frame, t('cost_value'), f"{total_cost:.2f} ₺", "#ffc107")
-    make_card(summary_frame, t('sales_value'), f"{total_sale:.2f} ₺", "#28a745")
-    make_card(summary_frame, t('estimated_profit'), f"{potential_profit:.2f} ₺", "#17a2b8")
+    make_card(summary_frame, t('cost_value'), f"{total_cost:.2f} {CURRENT_CURRENCY}", "#ffc107")
+    make_card(summary_frame, t('sales_value'), f"{total_sale:.2f} {CURRENT_CURRENCY}", "#28a745")
+    make_card(summary_frame, t('estimated_profit'), f"{potential_profit:.2f} {CURRENT_CURRENCY}", "#17a2b8")
     
     # Liste
     cols = ("name", "barcode", "stock", "unit", "buy", "sale", "total_buy", "total_sale")
@@ -2456,10 +2571,10 @@ def mount_cari_raporu(parent):
         tk.Label(f, text=value, font=("Segoe UI", 14, "bold"), bg=CARD_COLOR, fg=color).pack(anchor="w")
         return f
         
-    make_card(summary_frame, t('total_receivable_market'), f"{total_alacak:.2f} ₺", "green")
-    make_card(summary_frame, t('total_debt_ours'), f"{total_borc:.2f} ₺", "red")
+    make_card(summary_frame, t('total_receivable_market'), f"{total_alacak:.2f} {CURRENT_CURRENCY}", "green")
+    make_card(summary_frame, t('total_debt_ours'), f"{total_borc:.2f} {CURRENT_CURRENCY}", "red")
     
-    net_text = f"{abs(net_balance):.2f} ₺ " + (t('we_are_creditor') if net_balance < 0 else t('we_are_debtor'))
+    net_text = f"{abs(net_balance):.2f} {CURRENT_CURRENCY} " + (t('we_are_creditor') if net_balance < 0 else t('we_are_debtor'))
     net_color = "green" if net_balance < 0 else "red"
     make_card(summary_frame, t('net_status'), net_text, net_color)
     
@@ -2488,7 +2603,9 @@ def mount_cari_raporu(parent):
             color = "white"
             
         # Treeview'da satır rengi için tag kullanabiliriz ama şimdilik metin yeterli
-        tree.insert("", "end", values=(c[1], c[2], c[5], f"{abs(bal):.2f} ₺", status))
+        # c[5] is cari_type (alacakli/borclu)
+        ctype_disp = t(c[5]) if c[5] in ["alacakli", "borclu"] else c[5]
+        tree.insert("", "end", values=(c[1], c[2], ctype_disp, f"{abs(bal):.2f} {CURRENT_CURRENCY}", status))
 
 def mount_kasa_raporu(parent):
     mount_kasa_rapor(parent)
@@ -2550,7 +2667,7 @@ def mount_profit_loss_report(parent):
             row.pack(fill="x", pady=8)
             font_style = ("Segoe UI", size, "bold") if is_bold else ("Segoe UI", size)
             tk.Label(row, text=label, font=font_style, bg=CARD_COLOR, fg=FG_COLOR).pack(side="left")
-            tk.Label(row, text=f"{value:.2f} ₺", font=font_style, bg=CARD_COLOR, fg=color).pack(side="right")
+            tk.Label(row, text=f"{value:.2f} {CURRENT_CURRENCY}", font=font_style, bg=CARD_COLOR, fg=color).pack(side="right")
             
         add_row("Toplam Satış (Ciro):", total_revenue, "#10b981", True)
         add_row("Satılan Malın Maliyeti:", total_cogs, "#ef4444")
@@ -3229,7 +3346,7 @@ def mount_reports(parent):
     # Modern footer - toplam bilgisi
     footer = tk.Frame(parent, bg=CARD_COLOR)
     footer.pack(fill="x", padx=12, pady=(0,12))
-    lbl_sum = tk.Label(footer, text=f"{t('quantity')}: 0 | {t('total')}: 0.00 ₺",
+    lbl_sum = tk.Label(footer, text=f"{t('quantity')}: 0 | {t('total')}: 0.00 {CURRENT_CURRENCY}",
                       bg=CARD_COLOR, fg=ACCENT, font=("Segoe UI", 12, "bold"))
     lbl_sum.pack(side="left", padx=10)
 
@@ -3273,7 +3390,7 @@ def mount_reports(parent):
             row.pack(fill="x", pady=8, padx=15)
             font_style = ("Segoe UI", 12, "bold") if is_bold else ("Segoe UI", 12)
             tk.Label(row, text=label, font=font_style, bg=CARD_COLOR, fg=FG_COLOR).pack(side="left")
-            tk.Label(row, text=f"{value:.2f} ₺", font=font_style, bg=CARD_COLOR, fg=color).pack(side="right")
+            tk.Label(row, text=f"{value:.2f} {CURRENT_CURRENCY}", font=font_style, bg=CARD_COLOR, fg=color).pack(side="right")
             
         add_row("Toplam Satış:", total_revenue, "#10b981")
         add_row("Satılan Malın Maliyeti:", total_cogs, "#ef4444")
@@ -3308,7 +3425,7 @@ def mount_reports(parent):
             tree.insert("", "end", text=str(fis_id), values=(idx, ts_disp, pname, qty_disp, f"{float(price):.2f}", f"{float(total):.2f}"))
             t_qty += float(qty); t_sum += float(total)
         qty_total_disp = f"{t_qty:.3f}" if abs(t_qty - round(t_qty)) > 1e-6 else str(int(round(t_qty)))
-        lbl_sum.config(text=f"{t('quantity')}: {qty_total_disp} | {t('total')}: {t_sum:.2f} ₺")
+        lbl_sum.config(text=f"{t('quantity')}: {qty_total_disp} | {t('total')}: {t_sum:.2f} {CURRENT_CURRENCY}")
 
     def export_csv():
         frm, to = sv_from.get().strip(), sv_to.get().strip()
@@ -3390,7 +3507,7 @@ def mount_reports(parent):
             
             # Toplam satırı
             qty_total_disp = f"{t_qty:.3f}" if abs(t_qty - round(t_qty)) > 1e-6 else str(int(round(t_qty)))
-            data.append(['', '', t('total'), qty_total_disp, '', f"{t_sum:.2f} ₺"])
+            data.append(['', '', t('total'), qty_total_disp, '', f"{t_sum:.2f} {CURRENT_CURRENCY}"])
             
             product_table = Table(data, colWidths=[45*mm, 40*mm, 50*mm, 20*mm, 25*mm, 30*mm])
             product_table.setStyle(TableStyle([
@@ -3512,8 +3629,8 @@ def mount_cariler(parent):
     def update_summary():
         alacak = cari_service.get_total_alacak(cursor)
         borc = cari_service.get_total_borc(cursor)
-        total_alacak_label.config(text=f"✅ {t('total_alacak')} {alacak:.2f} ₺", foreground="#10b981")
-        total_borc_label.config(text=f"❌ {t('total_borc')} {borc:.2f} ₺", foreground="#ef4444")
+        total_alacak_label.config(text=f"✅ {t('total_alacak')} {alacak:.2f} {CURRENT_CURRENCY}", foreground="#10b981")
+        total_borc_label.config(text=f"❌ {t('total_borc')} {borc:.2f} {CURRENT_CURRENCY}", foreground="#ef4444")
 
     # Ana gövde: sol tarafta liste, sağ tarafta form
     body = ttk.Frame(parent, style="Card.TFrame")
@@ -3604,7 +3721,7 @@ def mount_cariler(parent):
                 cari_id, name, phone, address, balance, ctype = row[:6]
                 vd, vn = "", ""
 
-            balance_str = f"{float(balance):.2f} ₺"
+            balance_str = f"{float(balance):.2f} {CURRENT_CURRENCY}"
             type_str = t('alacakli') if ctype == 'alacakli' else t('borclu')
             
             tag = 'evenrow' if idx % 2 == 0 else 'oddrow'
@@ -3945,7 +4062,7 @@ def mount_sales(parent):
         result = product_svc.get_by_barcode(cursor, barcode)
         if result:
             pid, pname, price, stock, unit = result
-            messagebox.showinfo(t('price'), f"{pname}\n\n{t('price')}: {price:.2f} ₺\n{t('stock')}: {stock:.2f} {unit}")
+            messagebox.showinfo(t('price'), f"{pname}\n\n{t('price')}: {price:.2f} {CURRENT_CURRENCY}\n{t('stock')}: {stock:.2f} {unit}")
         else:
             messagebox.showerror(t('error'), t('product_not_found'))
     
@@ -4035,9 +4152,14 @@ def mount_sales(parent):
     middle_section = tk.Frame(content_container, bg=BG_COLOR)
     middle_section.pack(fill="both", expand=True, padx=12, pady=4)
     
+    # Grid Layout Kullanımı (Daha stabil yerleşim için)
+    middle_section.columnconfigure(0, weight=1) # Sol taraf (Sepet) genişleyebilir
+    middle_section.columnconfigure(1, weight=0) # Sağ taraf (Hızlı Menü) sabit
+    middle_section.rowconfigure(0, weight=1)
+
     # SOL PANEL: Ürün Listesi (genişlik artırıldı)
-    left_panel = tk.Frame(middle_section, bg=CARD_COLOR, width=750)
-    left_panel.pack(side="left", fill="both", expand=True, padx=(0,8), pady=0)
+    left_panel = tk.Frame(middle_section, bg=CARD_COLOR)
+    left_panel.grid(row=0, column=0, sticky="nsew", padx=(0,8), pady=0)
     
     # Ürün başlık ve ekle butonu
     product_header = tk.Frame(left_panel, bg=CARD_COLOR)
@@ -4066,6 +4188,8 @@ def mount_sales(parent):
     product_tree.column(t('price'), width=120, anchor="center", stretch=False)
     product_tree.column(t('total'), width=100, anchor="e", stretch=False)
     
+    product_tree.pack(fill="both", expand=True)
+
     product_tree.tag_configure('oddrow', background=BG_COLOR)
     product_tree.tag_configure('evenrow', background=CARD_COLOR)
 
@@ -4417,15 +4541,20 @@ def mount_sales(parent):
         x_scroll.set(first, last)
         refresh_all_qty_frames()
     product_tree.configure(xscrollcommand=on_tree_xview_changed, yscrollcommand=on_tree_yview_changed)
-    y_scroll.pack(side="right", fill="y")
-    x_scroll.pack(side="bottom", fill="x")
-    product_tree.pack(side="left", fill="both", expand=True)
     
+    # Grid ile yerleşim (Scrollbar'lar için)
+    product_frame.grid_rowconfigure(0, weight=1)
+    product_frame.grid_columnconfigure(0, weight=1)
+    
+    product_tree.grid(row=0, column=0, sticky="nsew")
+    y_scroll.grid(row=0, column=1, sticky="ns")
+    x_scroll.grid(row=1, column=0, sticky="ew")
+
     # ORTA PANEL: Ödeme Bilgileri ve Hızlı İşlemler
     center_panel = tk.Frame(middle_section, bg=BG_COLOR, width=420)
-    # Orta panelin dikeyde de genişleyebilmesi için expand=True yapıldı
-    center_panel.pack(side="left", fill="both", expand=True, padx=(0,8), pady=0)
-    center_panel.pack_propagate(False)
+    # Grid ile yerleşim
+    center_panel.grid(row=0, column=1, sticky="ns", padx=(0,8), pady=0)
+    center_panel.grid_propagate(False)
     
     # Ödeme bilgileri kutusu
     payment_box = tk.Frame(center_panel, bg=CARD_COLOR)
@@ -4819,7 +4948,7 @@ def mount_sales(parent):
         # Fiyat
         price_frame = tk.Frame(content, bg=BG_COLOR)
         price_frame.pack(fill="x", pady=(0,15))
-        tk.Label(price_frame, text="Fiyat (₺):", font=("Segoe UI", 10),
+        tk.Label(price_frame, text=f"Fiyat ({CURRENT_CURRENCY}):", font=("Segoe UI", 10),
                 bg=BG_COLOR, fg=TEXT_GRAY).pack(side="left", padx=(0,10))
         
         price_entry = ttk.Entry(price_frame, font=("Segoe UI", 10), width=15)
@@ -4932,7 +5061,7 @@ def mount_sales(parent):
                     try:
                         menu = tk.Menu(card, tearoff=0)
                         menu.add_command(label="✏️ Düzenle", command=lambda: show_add_quick_product_dialog({
-                            'id': pid, 'list_code': list_code or 'main', 'name': pname, 'price': float(str(pprice).replace('₺','').strip())
+                            'id': pid, 'list_code': list_code or 'main', 'name': pname, 'price': float(str(pprice).replace(CURRENT_CURRENCY,'').strip())
                         }))
                         def do_delete():
                             if messagebox.askyesno("Sil", f"'{pname}' silinsin mi?"):
@@ -4981,7 +5110,7 @@ def mount_sales(parent):
             rows = db_quick_list(current_list)
 
         for pid, list_code_val, name, price, sort_order in rows:
-            card = make_quick_card(name, f"₺ {price:g}", False, pid=pid, list_code=list_code_val)
+            card = make_quick_card(name, f"{CURRENT_CURRENCY} {price:g}", False, pid=pid, list_code=list_code_val)
             quick_product_cards.append(card)
             quick_card_meta[id(card)] = {'id': pid, 'name': name, 'price': price, 'list_code': list_code_val}
 
@@ -5356,7 +5485,7 @@ def mount_sales(parent):
         info_frame = tk.Frame(content, bg=BG_COLOR)
         info_frame.pack(pady=(0, 20))
         
-        tk.Label(info_frame, text=f"{t('total')}: {total_amount:.2f} ₺", font=("Segoe UI", 12, "bold"), 
+        tk.Label(info_frame, text=f"{t('total')}: {total_amount:.2f} {CURRENT_CURRENCY}", font=("Segoe UI", 12, "bold"), 
                  bg=BG_COLOR, fg="#ffc107").pack(pady=5)
         tk.Label(info_frame, text=f"{t('customer')}: {customer_name}", font=("Segoe UI", 10), 
                  bg=BG_COLOR, fg=FG_COLOR).pack()
@@ -5653,7 +5782,7 @@ def mount_sales(parent):
     for widget in quick_products_grid.winfo_children():
         if isinstance(widget, tk.Frame):
             for label in widget.winfo_children():
-                if isinstance(label, tk.Label) and "₺" not in label.cget("text"):
+                if isinstance(label, tk.Label) and CURRENT_CURRENCY not in label.cget("text"):
                     pname = label.cget("text")
                     widget.bind("<Button-1>", lambda e, p=pname: add_product_to_cart(p, 1))
     
@@ -5777,7 +5906,7 @@ def mount_cancel_sales(parent):
                 # Bilinmeyen veya eski kayıtlar için varsayılan
                 pay_display = "💳 " + t('credit_card') if pay != 'cash' else "💵 " + t('cash')
             
-            tree.insert("", "end", values=(fis_id, ts_disp, f"{float(sum_total):.2f} ₺", pay_display))
+            tree.insert("", "end", values=(fis_id, ts_disp, f"{float(sum_total):.2f} {CURRENT_CURRENCY}", pay_display))
 
     def cancel_selected():
         sel = tree.selection()
@@ -6403,6 +6532,7 @@ def open_main_window(role, username):
         
         msub(settings_sub, t('quick_menu_settings'), lambda: mount_quick_menu_settings(right_panel))
         msub(settings_sub, t('theme_settings'), lambda: mount_theme_settings(right_panel))
+        msub(settings_sub, t('currency_settings'), lambda: show_currency_setup(force=True))
         
     else:
         mbtn(menu, "🛒 " + t('sales'), lambda: mount_sales(right_panel))
@@ -6749,6 +6879,97 @@ def show_language_setup():
     
     setup_window.mainloop()
 
+def show_currency_setup(force=False):
+    """İlk açılışta para birimi seçim ekranı göster"""
+    global CURRENT_CURRENCY
+    
+    # Eğer ana pencere varsa Toplevel kullan, yoksa Tk
+    setup_window = None
+    try:
+        if 'main' in globals() and globals()['main'].winfo_exists():
+            setup_window = tk.Toplevel(globals()['main'])
+    except:
+        pass
+        
+    if setup_window is None:
+        setup_window = tk.Tk()
+        
+    setup_window.title("SmartPOS Mini Pro - Currency Setup")
+    
+    # Pencereyi görünür ve en üstte yap
+    setup_window.lift()
+    setup_window.attributes('-topmost', True)
+    setup_window.after_idle(setup_window.attributes, '-topmost', False)
+    
+    set_theme(setup_window)
+    center_window(setup_window, 600, 600)
+    
+    # Ana container
+    main_container = tk.Frame(setup_window, bg=BG_COLOR)
+    main_container.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    # Başlık
+    ttk.Label(main_container, text="💰", font=("Segoe UI", 48)).pack(pady=(20, 10))
+    ttk.Label(main_container, text=t('app_title'), style="Header.TLabel").pack(pady=(0, 5))
+    ttk.Label(main_container, text="Para Birimi Seçiniz / Select Currency", 
+              style="TLabel", font=("Segoe UI", 11)).pack(pady=(5, 30))
+    
+    # Para birimi seçenekleri
+    curr_frame = tk.Frame(main_container, bg=BG_COLOR)
+    curr_frame.pack(pady=20, fill="x")
+    
+    def create_setup_curr_button(symbol, label, description):
+        container = tk.Frame(curr_frame, bg=BG_COLOR)
+        container.pack(pady=8, padx=20, fill="x")
+        
+        def select():
+            set_currency(symbol)
+            setup_window.destroy()
+            if not force:
+                setup_window.quit()
+            else:
+                messagebox.showinfo(t('info'), t('restart_required'))
+        
+        btn = tk.Button(container, 
+                       text=f"{symbol}  {label}",
+                       bg=CARD_COLOR,
+                       fg="white",
+                       font=("Segoe UI", 12),
+                       activebackground=ACCENT,
+                       activeforeground="white",
+                       relief="flat",
+                       padx=30, pady=15,
+                       borderwidth=0,
+                       cursor="hand2",
+                       command=select,
+                       anchor="w")
+        btn.pack(fill="x")
+        
+        ttk.Label(container, text=description, style="Sub.TLabel").pack(pady=(5, 0))
+        
+        def on_enter(e):
+            btn.config(bg=ACCENT)
+        def on_leave(e):
+            btn.config(bg=CARD_COLOR)
+        
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        
+        return btn
+    
+    create_setup_curr_button("₺", "Türk Lirası", "Turkish Lira (TRY)")
+    create_setup_curr_button("$", "US Dollar", "United States Dollar (USD)")
+    create_setup_curr_button("€", "Euro", "Euro (EUR)")
+    create_setup_curr_button("£", "British Pound", "Pound Sterling (GBP)")
+    
+    if force:
+        # Eğer ayarlardan açıldıysa, kapat butonu ekle
+        tk.Button(setup_window, text=t('cancel'), command=setup_window.destroy,
+                 bg="#dc3545", fg="white", font=("Segoe UI", 10),
+                 relief="flat", padx=20, pady=10).pack(pady=20)
+    else:
+        setup_window.mainloop()
+
 def check_first_run():
     """İlk çalıştırma kontrolü - dil ayarı var mı?"""
     try:
@@ -6759,6 +6980,15 @@ def check_first_run():
         return result is None
     except Exception as e:
         return True
+
+def check_currency_set():
+    """Para birimi ayarı var mı?"""
+    try:
+        cursor.execute("SELECT value FROM settings WHERE key='currency'")
+        result = cursor.fetchone()
+        return result is not None
+    except Exception:
+        return False
 
 # ==========================
 # Çalıştır
@@ -6771,11 +7001,15 @@ if __name__ == "__main__":
     except Exception as e:
         pass
     
-    # İlk çalıştırma kontrolü yap
+    # İlk çalıştırma kontrolü yap (Dil)
     if check_first_run():
         show_language_setup()
-        # Dil seçildikten sonra mainloop sona erdi, dili yükle ve giriş ekranını aç
         load_language_preference()
+        
+    # Para birimi kontrolü
+    if not check_currency_set():
+        show_currency_setup()
+        load_currency_preference()
     
     # Giriş ekranını aç
     start_login_screen()

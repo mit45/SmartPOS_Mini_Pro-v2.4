@@ -1,7 +1,19 @@
 from datetime import datetime
 from tkinter import messagebox, simpledialog
+import sqlite3
 from languages import LANGUAGES
 
+
+def get_currency_symbol():
+    try:
+        conn = sqlite3.connect("database.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM settings WHERE key='currency'")
+        r = cursor.fetchone()
+        conn.close()
+        return r[0] if r else "₺"
+    except:
+        return "₺"
 
 def print_thermal_receipt(sales_list, fis_id="", customer_name="Müşteri", kdv_rate=18.0, discount_rate=0.0, vat_included: bool = False, language_code: str = "tr"):
     """
@@ -11,6 +23,8 @@ def print_thermal_receipt(sales_list, fis_id="", customer_name="Müşteri", kdv_
     """
     def t(key: str):
         return LANGUAGES.get(language_code, LANGUAGES["tr"]).get(key, key)
+    
+    currency_symbol = get_currency_symbol()
 
     try:
         # python-escpos kütüphanesi gerekli
@@ -91,14 +105,14 @@ def print_thermal_receipt(sales_list, fis_id="", customer_name="Müşteri", kdv_
         grand_total = subtotal_gross - discount_amt
         
         p.text("-" * 32 + "\n")
-        p.text(f"{t('receipt_subtotal'):<20} {subtotal_gross:>11.2f} TL\n")
-        p.text(f"{t('receipt_discount')} ({discount_rate:.1f}%):{-discount_amt:>8.2f} TL\n")
+        p.text(f"{t('receipt_subtotal'):<20} {subtotal_gross:>11.2f} {currency_symbol}\n")
+        p.text(f"{t('receipt_discount')} ({discount_rate:.1f}%):{-discount_amt:>8.2f} {currency_symbol}\n")
         p.text("=" * 32 + "\n")
         
         # Genel toplam (büyük font)
         set_style(align='right', bold=True, width=2, height=2)
         p.text(f"{t('receipt_grand_total')}\n")
-        p.text(f"{grand_total:.2f} TL\n")
+        p.text(f"{grand_total:.2f} {currency_symbol}\n")
         
         # Teşekkür
         set_style(align='center', bold=False, width=1, height=1)
